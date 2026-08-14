@@ -1,0 +1,39 @@
+{
+  "accounts": {
+    "description": "Z-Library 账号池。每个键是一个账号的备注名（如 account1），值支持两种填法：① email+password；② remix_userid+remix_userkey（成对填写，可直接在 Z-Library 个人页获取）。",
+    "type": "object",
+    "items": {
+      "email": {
+        "description": "Z-Library 账号邮箱",
+        "type": "string"
+      },
+      "password": {
+        "description": "账号密码",
+        "type": "string"
+      },
+      "remix_userid": {
+        "description": "（备选填法）remix_userid，需与 remix_userkey 成对",
+        "type": "string"
+      },
+      "remix_userkey": {
+        "description": "（备选填法）remix_userkey",
+        "type": "string"
+      }
+    }
+  },
+  "domain": {
+    "description": "Z-Library E-API 域名。域名可能变动，若请求失败请更换为可用域名（如 z-library.sk）。",
+    "type": "string",
+    "default": "z-library.sk"
+  },
+  "proxy": {
+    "description": "HTTP 代理（可选）。服务器在国内访问 Z-Library 时需要，如 http://127.0.0.1:7897",
+    "type": "string",
+    "default": ""
+  },
+  "search_limit": {
+    "description": "搜索默认返回的书籍条数上限",
+    "type": "int",
+    "default": 5
+  }
+}

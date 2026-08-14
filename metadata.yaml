@@ -1,0 +1,6 @@
+name: astrbot_plugin_zlibrary_assistant # 插件唯一识别名（必须以 astrbot_plugin_ 开头）
+display_name: ZLibrary Assistant # 展示名
+desc: 为 LLM 提供 Z-Library 图书搜索与下载工具（账号池、HTML 卡片结果、额度管控）。 # 简短描述
+version: v0.1.0 # 插件版本
+author: OMSociety # 作者
+repo: https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant # 插件仓库地址
