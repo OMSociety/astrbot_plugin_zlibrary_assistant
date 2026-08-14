@@ -238,4 +238,4 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 
 ## 👤 作者
 
-**Slandre & Flandre** — [@OMSociety](https://github.com/OMSociety)
+— [**@OMSociety**](https://github.com/OMSociety)
