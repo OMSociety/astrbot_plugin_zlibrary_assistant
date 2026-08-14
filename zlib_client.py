@@ -310,12 +310,22 @@ class ZlibClient:
     async def login_account(self, account: Account) -> Account:
         """登录一个账号（email+password 或 remix id/key 两种方式）。"""
         if account.email and account.password:
-            resp = await self._request_json(
-                "POST",
-                EP_LOGIN,
-                account=account,
-                data={"email": account.email, "password": account.password},
-            )
+            try:
+                resp = await self._request_json(
+                    "POST",
+                    EP_LOGIN,
+                    account=account,
+                    data={"email": account.email, "password": account.password},
+                )
+            except ZlibError as e:
+                if e.category == "rate_limited":
+                    raise ZlibError(
+                        "rate_limited",
+                        f"{e.message}。提示：Z-Library 对 login 端点风控较严，"
+                        f"建议在插件配置中改用 remix_userid+remix_userkey 方式登录"
+                        f"（走 GET profile 验证，几乎不受该限流影响）",
+                    )
+                raise
             await self._apply_login_response(account, resp)
         elif account.remix_userid and account.remix_userkey:
             resp = await self._request_json(

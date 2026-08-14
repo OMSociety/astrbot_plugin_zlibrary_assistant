@@ -106,6 +106,17 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
    ```
    保存后重启 AstrBot。
 
+### Q7：登录一直提示"IP 限流"（#ipd3），但网页能访问？
+
+**原因**：Z-Library 对 **login 端点**有独立风控（比只读端点严格），机场共享 IP 很容易被标记；`/eapi/info` 等只读接口仍可访问，但 `email+password` 登录被拒。
+
+**解决**：改用 **`remix_userid` + `remix_userkey`** 方式配置账号（不走 login 端点，只做 GET 验证，基本不受该风控影响）：
+1. 任意时候成功登录过一次 Z-Library 后，在个人页/客户端获取这两个值
+2. 在插件配置 `accounts` 中填 `remix_userid` 和 `remix_userkey`（留空 email/password）
+3. 插件将用 GET `/eapi/user/profile` 验证并正常使用搜索/下载
+
+> 提示：`remix_userkey` 长期有效，配置一次即可长期使用。
+
 ## 📄 开发状态
 
 - v0.1.0：搜索 + 下载 + 状态工具，账号池，HTML 卡片，错误分类
