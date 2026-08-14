@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import dataclass
 
 import aiohttp
 
 # 使用 AstrBot 插件 logger（与插件日志格式一致，避免 loguru record 缺字段）
 from astrbot.api import logger
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 # 各端点（域名由配置提供，前缀 https://{domain}）
 EP_LOGIN = "/eapi/user/login"
@@ -150,7 +152,41 @@ class ZlibClient:
         self._session: aiohttp.ClientSession | None = None
         self._session_lock = asyncio.Lock()
         # 搜索结果的书籍缓存：id -> book dict（下载时按 id 取完整信息，含 hash）
+        # 持久化到磁盘，AstrBot 重启后仍可凭 id 下载
         self.book_cache: dict[int, dict] = {}
+        self._load_book_cache()
+
+    # ---------- 书籍缓存持久化 ----------
+
+    def _cache_file(self) -> str:
+        try:
+            base = get_astrbot_data_path()
+        except Exception:  # noqa: BLE001 - 非 AstrBot 环境（如独立测试）时退化到内存缓存
+            base = os.path.join(os.path.expanduser("~"), ".astrbot_zlibrary")
+        return os.path.join(base, "zlibrary_assistant", "book_cache.json")
+
+    def _load_book_cache(self):
+        try:
+            path = self._cache_file()
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.book_cache = {int(k): v for k, v in data.items()}
+        except Exception:  # noqa: BLE001 - 缓存损坏不影响运行
+            self.book_cache = {}
+
+    def _save_book_cache(self):
+        try:
+            path = self._cache_file()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {str(k): v for k, v in self.book_cache.items()},
+                    f,
+                    ensure_ascii=False,
+                )
+        except Exception as e:  # noqa: BLE001 - 缓存写入失败不影响运行
+            logger.warning(f"书籍缓存写入失败: {e}")
 
     # ---------- 会话管理 ----------
 
@@ -357,24 +393,25 @@ class ZlibClient:
                 json.dumps(resp, ensure_ascii=False)[:200],
             )
         books = resp.get("books") or []
-        # 缓存书籍信息（供 download_by_id 使用）
+        # 缓存书籍信息（供 download_by_id 使用），并持久化到磁盘
         for b in books:
             try:
                 self.book_cache[int(b["id"])] = b
             except (KeyError, TypeError, ValueError):
                 continue
+        self._save_book_cache()
         return books
 
     async def download_by_id(self, book_id: int) -> tuple[Account, str, bytes]:
-        """按 id 下载书籍（id 必须来自之前 search 的结果缓存）。
+        """按 id 下载书籍（id 必须来自之前 search 的结果缓存，缓存已持久化）。
 
-        若缓存中无该书（例如 AstrBot 重启后），抛 ZlibError 提示先搜索。
+        若缓存中无该书，抛 ZlibError 提示先搜索。
         """
         book = self.book_cache.get(int(book_id))
         if book is None:
             raise ZlibError(
                 "api_error",
-                f"没有 id={book_id} 的书籍信息（AstrBot 重启后缓存会清空），请先调用 zlib_search_books 搜索",
+                f"没有 id={book_id} 的书籍信息，请先调用 zlib_search_books 搜索",
             )
         return await self.download(book)
 
