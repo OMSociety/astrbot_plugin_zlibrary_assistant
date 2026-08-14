@@ -1,55 +1,64 @@
 {
   "accounts": {
     "type": "template_list",
-    "description": "Z-Library 账号池：每个条目一个账号，可添加多个。每个账号每日独立下载额度（免费约 10 次/天），下载时自动轮换到额度最多的账号。",
+    "description": "Z-Library 账号池（可添加多个账号，下载时自动轮换到剩余额度最多的账号）",
+    "hint": "每个账号每日独立下载额度（免费约 10 次/天），多账号可提高每日总下载次数。推荐使用 remix 凭证方式（最下面两项），几乎不受 Z-Library 登录风控影响。",
     "templates": {
       "account": {
         "name": "账号",
-        "hint": "Z-Library 账号",
+        "hint": "添加多个账号可共享每日下载额度（每个账号免费约 10 次/天）",
         "display_item": "name",
         "items": {
           "name": {
-            "description": "账号备注名（用于日志区分）",
+            "description": "账号备注名",
             "type": "string",
-            "default": "account"
+            "default": "account",
+            "hint": "仅用于日志区分，如 account1、account2"
           },
           "email": {
-            "description": "Z-Library 账号邮箱（与密码成对填写，登录后自动换取 remix 凭证）",
+            "description": "账号邮箱（方式一）",
             "type": "string",
-            "default": ""
+            "default": "",
+            "hint": "与密码成对填写；登录成功后插件会自动换取 remix 凭证。注意：login 端点易被 Z-Library 对共享 IP 风控（#ipd3），若一直提示限流请改用下方 remix 方式"
           },
           "password": {
-            "description": "账号密码",
+            "description": "账号密码（方式一）",
             "type": "string",
-            "default": ""
+            "default": "",
+            "hint": "Z-Library 账号密码，与邮箱成对"
           },
           "remix_userid": {
-            "description": "备选填法：remix_userid（与 remix_userkey 成对，可在 Z-Library 个人页获取）",
+            "description": "remix_userid（方式二，推荐）",
             "type": "string",
-            "default": ""
+            "default": "",
+            "hint": "获取方法：浏览器登录 z-library.sk 后按 F12 → Application/应用 → Storage/Cookies → 复制 remix_userid 的值。与 remix_userkey 成对填写，插件走 GET profile 验证，不受 login 端点风控影响"
           },
           "remix_userkey": {
-            "description": "备选填法：remix_userkey",
+            "description": "remix_userkey（方式二，推荐）",
             "type": "string",
-            "default": ""
+            "default": "",
+            "hint": "同上，Cookie 中的 remix_userkey（一长串字母数字），长期有效。两种方式都填时 remix 优先"
           }
         }
       }
     }
   },
   "domain": {
-    "description": "Z-Library E-API 域名。域名可能变动，若请求失败请更换为可用域名（如 z-library.sk）。",
+    "description": "Z-Library E-API 域名",
     "type": "string",
-    "default": "z-library.sk"
+    "default": "z-library.sk",
+    "hint": "域名可能被没收/变动。失效时（提示『当前域名可能已失效』）换一个可用域名，如 z-library.sk、singlelogin.re。验证方法：浏览器访问 https://<域名>/eapi/info，返回 JSON 即有效"
   },
   "proxy": {
-    "description": "HTTP 代理（可选）。服务器在国内访问 Z-Library 时需要，如 http://127.0.0.1:7897",
+    "description": "HTTP 代理（可选）",
     "type": "string",
-    "default": ""
+    "default": "",
+    "hint": "服务器在国内访问 Z-Library 必须填写，格式 http://IP:端口，如 http://127.0.0.1:7897。境外服务器可留空"
   },
   "search_limit": {
-    "description": "搜索默认返回的书籍条数上限",
+    "description": "搜索默认返回条数",
     "type": "int",
-    "default": 5
+    "default": 5,
+    "hint": "LLM 不指定条数时使用的默认值，范围 1-8（超过 8 会被限制，防止卡片图片过大）"
   }
 }
