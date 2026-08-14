@@ -4,7 +4,7 @@
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
-为 LLM 提供 Z-Library 图书搜索与下载能力的电子书助手，账号池轮换、HTML 卡片结果、下载额度管控一应俱全。
+为 Astrbot 提供 Z-Library 图书搜索与下载能力（账号池、HTML 卡片结果、额度管控）。
 
 > 本项目由AI编写
 
