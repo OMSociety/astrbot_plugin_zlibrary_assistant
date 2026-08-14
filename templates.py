@@ -28,8 +28,7 @@ SEARCH_CARD_TMPL = """<!DOCTYPE html>
     margin-bottom: 14px;
     padding-left: 2px;
   }
-  .header b { color: #374151; }
-  .card {
+  .header b { color: #374151; }  .card {
     display: flex;
     align-items: center;
     background: #ffffff;
@@ -110,7 +109,7 @@ SEARCH_CARD_TMPL = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div class="header">📚 <b>{{ query }}</b> 的搜索结果（{{ books|length }} 本，需要下载请回复编号）</div>
+<div class="header">关键词：<b>{{ query }}</b> · 共 {{ books|length }} 本（需要下载请回复编号）</div>
 {% for book in books %}
 <div class="card">
   <div class="index">{{ loop.index }}</div>
