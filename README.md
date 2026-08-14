@@ -89,6 +89,23 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 
 插件仅依赖 `aiohttp`（异步 HTTP 库），AstrBot 安装插件时自动处理。文转图使用 AstrBot 内置能力，无需额外安装。
 
+### Q6：下载完成但发不出文件，提示 "Sandbox runtime is disabled"？
+
+**原因**：AstrBot 的 `send_message_to_user` 发送本地文件依赖 **Computer Use 本地运行时**（`computer_use_runtime`），而 AstrBot 默认是 `none`，导致本地文件被沙盒拦截。
+
+**解决**（WebUI 或配置文件二选一）：
+1. **WebUI**：`配置（Config）→ 服务提供商设置 → computer_use_runtime` 改为 `local`（并可将 `computer_use_require_admin` 设为 `false`）
+2. **配置文件**：编辑 `data/config/astrbot_config.json`（不存在则创建）：
+   ```json
+   {
+     "provider_settings": {
+       "computer_use_runtime": "local",
+       "computer_use_require_admin": false
+     }
+   }
+   ```
+   保存后重启 AstrBot。
+
 ## 📄 开发状态
 
 - v0.1.0：搜索 + 下载 + 状态工具，账号池，HTML 卡片，错误分类

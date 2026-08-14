@@ -1,4 +1,9 @@
-"""zlib_download_book 工具：按 id 下载书籍到 AstrBot 数据目录。"""
+"""zlib_download_book 工具：按 id 下载书籍到 AstrBot 数据目录。
+
+文件保存到 <AstrBot data>/zlibrary_assistant/books/，向 LLM 返回**绝对路径**。
+AstrBot 的 send_message_to_user 在 Computer Use 本地运行时（computer_use_runtime=local）
+下允许发送本地绝对路径文件（需在 WebUI 启用 Computer Use）。
+"""
 
 from __future__ import annotations
 
@@ -25,7 +30,7 @@ class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
         "重要：仅在用户明确要求下载某本书时才调用，不要擅自下载！"
         "每次下载会消耗账号的每日下载额度（每个账号每日约 10 次，账号池共享轮换）。"
         "book_id 必须来自 zlib_search_books 的搜索结果。"
-        "下载完成后请使用 send_message_to_user（type=file）把文件发送给用户，并告知剩余下载额度。"
+        "下载完成后请使用 send_message_to_user（type=file, path=绝对路径）把文件发送给用户，并告知剩余下载额度。"
     )
     parameters: dict = Field(
         default_factory=lambda: {
@@ -79,5 +84,6 @@ class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
             f"- 大小：{len(content) / 1024 / 1024:.1f} MB\n"
             f"- 保存路径：{out_path}\n"
             f"- 使用账号：{account.name}（今日剩余额度 {left} 次）\n"
-            f"请用 send_message_to_user（type=file, path={out_path}）把文件发给用户。"
+            f"请用 send_message_to_user 发送文件给用户："
+            f'{{"type": "file", "path": "{out_path}"}}（绝对路径）。'
         )
