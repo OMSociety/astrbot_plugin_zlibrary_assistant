@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import base64
 from typing import Any
 
-import mcp
-from mcp.types import CallToolResult, ImageContent, TextContent
+from mcp.types import CallToolResult, TextContent
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 
@@ -124,23 +122,17 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
             + "\n提示：搜索不消耗下载额度；用户要求下载时，请用 zlib_download_book 并传入对应 id。"
         )
 
-        # 渲染 HTML 卡片图片（供 LLM 用 send_message_to_user 发送给用户）
+        # 渲染 HTML 卡片图片（封面/标题/作者/格式），保存到本地文件
+        # 注意：不通过 ImageContent 返回（纯文本模型如 deepseek-chat 会因 image_url 报 400），
+        # 而是给出图片路径，由 LLM 用 send_message_to_user(type=image) 发送给用户。
         img_path = await _render_book_card(books[:MAX_COVER_CARDS], query)
         if img_path:
-            try:
-                with open(img_path, "rb") as f:
-                    img_b64 = base64.b64encode(f.read()).decode("ascii")
-                content: list[Any] = [
-                    TextContent(type="text", text=text),
-                    ImageContent(
-                        type="image", data=img_b64, mimeType="image/jpeg"
-                    ),
-                ]
-                return CallToolResult(content=content, isError=False)
-            except Exception as e:
-                logger.warning(f"读取渲染图片失败，降级为纯文本: {e}")
+            text += (
+                f"\n\n已生成搜索结果卡片图片（含封面）：{img_path}\n"
+                f"请使用 send_message_to_user 发送该图片给用户："
+                f'{{"type": "image", "path": "{img_path}"}}。'
+            )
 
-        # 渲染失败降级：纯文本
         return CallToolResult(
             content=[TextContent(type="text", text=text)],
             isError=False,
