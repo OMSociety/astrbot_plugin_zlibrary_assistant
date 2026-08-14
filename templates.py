@@ -5,7 +5,8 @@
 
 注意：
 - 字体用 CSS 字体栈，云端 t2i 渲染时自动选择可用中文字体，不依赖本地
-- 封面图用 <img src> 引用 Z-Library CDN，加载失败时 onerror 隐藏（不影响文字信息）
+- 封面图用 <img src> 引用 Z-Library CDN；云端渲染器可能无法访问该域名，
+  因此封面下方内置渐变占位（📕），封面加载失败时自动露出，卡片不空白
 """
 
 SEARCH_CARD_TMPL = """<!DOCTYPE html>
@@ -45,27 +46,55 @@ SEARCH_CARD_TMPL = """<!DOCTYPE html>
     text-align: center;
     flex-shrink: 0;
   }
-  .cover {
+  /* 封面容器：内嵌渐变占位，封面加载失败时露出 */
+  .cover-wrap {
+    position: relative;
     width: 84px;
     height: 120px;
-    object-fit: cover;
     border-radius: 6px;
-    background: #e5e7eb;
+    overflow: hidden;
     flex-shrink: 0;
+    background: linear-gradient(135deg, #eef2ff 0%, #e5e7eb 100%);
+  }
+  .cover-fallback {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 34px;
+    color: #a5b4fc;
+  }
+  .cover {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
   .info { margin-left: 14px; flex: 1; min-width: 0; }
   .title {
-    font-size: 17px;
+    font-size: 16px;
     font-weight: 700;
     color: #111827;
     margin: 0 0 6px;
     line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
     word-break: break-all;
   }
   .author {
     font-size: 13px;
     color: #6b7280;
     margin: 0 0 8px;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .badges { white-space: nowrap; }
   .badge {
@@ -81,15 +110,16 @@ SEARCH_CARD_TMPL = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div class="header">📚 <b>{{ query }}</b> 的搜索结果（{{ books|length }} 本，下载请回复书籍编号）</div>
+<div class="header">📚 <b>{{ query }}</b> 的搜索结果（{{ books|length }} 本，需要下载请回复编号）</div>
 {% for book in books %}
 <div class="card">
   <div class="index">{{ loop.index }}</div>
-  {% if book.cover %}
-  <img class="cover" src="{{ book.cover }}" onerror="this.style.display='none'">
-  {% else %}
-  <div class="cover"></div>
-  {% endif %}
+  <div class="cover-wrap">
+    <div class="cover-fallback">📕</div>
+    {% if book.cover %}
+    <img class="cover" src="{{ book.cover }}" onerror="this.style.display='none'">
+    {% endif %}
+  </div>
   <div class="info">
     <div class="title">{{ book.title }}</div>
     <div class="author">{{ book.author }}</div>
