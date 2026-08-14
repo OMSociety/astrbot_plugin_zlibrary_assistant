@@ -65,7 +65,10 @@ class ZLibraryAssistantPlugin(Star):
         )
         # 注册 LLM 工具（>= v4.5.1 的标准方式）
         self.context.add_llm_tools(
-            ZlibSearchBooksTool(client=self.client),
+            ZlibSearchBooksTool(
+                client=self.client,
+                search_limit=int(config.get("search_limit", 5) or 5),
+            ),
             ZlibDownloadBookTool(client=self.client),
             ZlibGetStatusTool(client=self.client),
         )

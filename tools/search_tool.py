@@ -58,6 +58,7 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
         "当用户想找书、查书、要电子书、要下载某本书（提到书名/作者/关键词）时调用此工具。"
         "返回结果包含书籍卡片图片（封面/标题/作者/格式/大小）和带 id 的文本列表，"
         "搜索不消耗任何下载额度。若用户之后要求下载，请使用 zlib_download_book 并传入对应 id。"
+        "不传 limit 时返回条数由插件配置（search_limit）决定，无需自行猜测默认值。"
     )
     parameters: dict = Field(
         default_factory=lambda: {
@@ -69,7 +70,7 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "返回条数上限（默认 5，最大 8）",
+                    "description": "返回条数上限（可选；不传则使用插件配置 search_limit，最大 8）",
                 },
                 "language": {
                     "type": "string",
@@ -84,6 +85,7 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
         }
     )
     client: ZlibClient | None = None
+    search_limit: int = 5
 
     async def call(
         self, context: ContextWrapper[AstrAgentContext], **kwargs: Any
@@ -95,7 +97,8 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
         if self.client is None:
             return "插件客户端未初始化，请检查插件配置"
 
-        limit = int(kwargs.get("limit", 5) or 5)
+        # limit 优先用参数，未传则使用插件配置的 search_limit
+        limit = int(kwargs.get("limit") or self.search_limit or 5)
         limit = max(1, min(limit, 8))
         language = str(kwargs.get("language", "") or "").strip()
         extension = str(kwargs.get("extension", "") or "").strip()
