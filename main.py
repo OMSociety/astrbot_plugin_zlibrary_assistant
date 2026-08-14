@@ -63,6 +63,7 @@ class ZLibraryAssistantPlugin(Star):
             domain=config.get("domain", "z-library.sk"),
             proxy=config.get("proxy", ""),
         )
+        self._login_task: asyncio.Task | None = None
         # 注册 LLM 工具（>= v4.5.1 的标准方式）
         self.context.add_llm_tools(
             ZlibSearchBooksTool(
@@ -76,7 +77,7 @@ class ZLibraryAssistantPlugin(Star):
 
     async def initialize(self):
         """插件初始化：后台预登录账号池（失败不阻塞启动）。"""
-        asyncio.create_task(self._background_login())
+        self._login_task = asyncio.create_task(self._background_login())
 
     async def _background_login(self):
         try:
@@ -86,5 +87,11 @@ class ZLibraryAssistantPlugin(Star):
             logger.warning(f"ZLibrary 账号池后台登录失败: {e}")
 
     async def terminate(self):
-        """插件卸载时关闭网络会话。"""
+        """插件卸载/重载时：取消未完成的后台登录，关闭网络会话。"""
+        if self._login_task is not None and not self._login_task.done():
+            self._login_task.cancel()
+            try:
+                await self._login_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 - 取消任务是预期行为
+                logger.debug("后台登录任务已取消")
         await self.client.close()

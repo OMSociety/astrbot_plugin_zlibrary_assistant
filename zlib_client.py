@@ -151,6 +151,8 @@ class ZlibClient:
             )
         self._session: aiohttp.ClientSession | None = None
         self._session_lock = asyncio.Lock()
+        # 登录互斥锁：防止插件更新/重载导致新旧实例并发触发 login_all
+        self._login_lock = asyncio.Lock()
         # 搜索结果的书籍缓存：id -> book dict（下载时按 id 取完整信息，含 hash）
         # 持久化到磁盘，AstrBot 重启后仍可凭 id 下载
         self.book_cache: dict[int, dict] = {}
@@ -347,14 +349,24 @@ class ZlibClient:
         return account
 
     async def login_all(self):
-        """登录账号池全部账号；单个失败不影响其他账号。"""
-        for account in self.pool:
-            try:
-                await self.login_account(account)
-            except ZlibError as e:
-                account.logged_in = False
-                account.last_error = e.message
-                logger.warning(f"账号 {account.name} 登录失败: {e}")
+        """登录账号池全部账号；单个失败不影响其他账号。
+
+        防重入：并发触发（如插件更新/重载时新旧实例并行 initialize）
+        时通过互斥锁保证只执行一轮；已登录成功的账号跳过。
+        """
+        if self._login_lock.locked():
+            logger.info("账号池登录已在执行中，跳过重复登录")
+            return
+        async with self._login_lock:
+            for account in self.pool:
+                if account.logged_in:
+                    continue
+                try:
+                    await self.login_account(account)
+                except ZlibError as e:
+                    account.logged_in = False
+                    account.last_error = e.message
+                    logger.warning(f"账号 {account.name} 登录失败: {e}")
         if not any(a.logged_in for a in self.pool):
             raise ZlibError(
                 "auth_failed",
