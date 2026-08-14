@@ -308,8 +308,17 @@ class ZlibClient:
         account.last_error = ""
 
     async def login_account(self, account: Account) -> Account:
-        """登录一个账号（email+password 或 remix id/key 两种方式）。"""
-        if account.email and account.password:
+        """登录一个账号（remix id/key 优先，email+password 后备）。"""
+        # remix 凭证优先：GET /eapi/user/profile 验证，不走 login 端点，
+        # 不受 Z-Library 对 login 端点的 IP 风控（#ipd3）影响
+        if account.remix_userid and account.remix_userkey:
+            resp = await self._request_json(
+                "GET",
+                EP_PROFILE,
+                account=account,
+            )
+            await self._apply_login_response(account, resp)
+        elif account.email and account.password:
             try:
                 resp = await self._request_json(
                     "POST",
@@ -326,13 +335,6 @@ class ZlibClient:
                         f"（走 GET profile 验证，几乎不受该限流影响）",
                     )
                 raise
-            await self._apply_login_response(account, resp)
-        elif account.remix_userid and account.remix_userkey:
-            resp = await self._request_json(
-                "GET",
-                EP_PROFILE,
-                account=account,
-            )
             await self._apply_login_response(account, resp)
         else:
             raise ZlibError(
