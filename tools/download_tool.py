@@ -5,15 +5,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from mcp.types import CallToolResult, TextContent
-from pydantic import ConfigDict, Field
-from pydantic.dataclasses import dataclass
-
+import aiofiles
 from astrbot.api import logger
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+from pydantic import ConfigDict, Field
+from pydantic.dataclasses import dataclass
 
 from ..zlib_client import ZlibClient, ZlibError
 
@@ -67,8 +66,8 @@ class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
         # 保存文件到 AstrBot 数据目录
         try:
             out_path = os.path.join(self._download_dir(), filename)
-            with open(out_path, "wb") as f:
-                f.write(content)
+            async with aiofiles.open(out_path, "wb") as f:
+                await f.write(content)
         except OSError as e:
             logger.error(f"保存下载文件失败: {e}")
             return f"下载成功但保存文件失败：{e}"

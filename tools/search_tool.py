@@ -4,15 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.types import CallToolResult, TextContent
-from pydantic import ConfigDict, Field
-from pydantic.dataclasses import dataclass
-
 from astrbot.api import logger
 from astrbot.core import html_renderer
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
+from mcp.types import CallToolResult, TextContent
+from pydantic import ConfigDict, Field
+from pydantic.dataclasses import dataclass
 
 from ..templates import SEARCH_CARD_TMPL
 from ..zlib_client import ZlibClient, ZlibError
@@ -46,7 +45,7 @@ async def _render_book_card(books: list[dict], query: str) -> str | None:
             options={"full_page": True, "type": "jpeg", "quality": 40},
         )
         return img_path
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 渲染失败需降级，不向上抛
         logger.warning(f"搜索结果卡片渲染失败，降级为纯文本: {e}")
         return None
 

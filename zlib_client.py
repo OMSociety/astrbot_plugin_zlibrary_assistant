@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import aiohttp
 
@@ -83,11 +83,7 @@ class Account:
 
 def _is_rate_limited(text: str) -> bool:
     """识别 IP 限流响应。"""
-    return (
-        "Too many requests" in text
-        or "#ipd3" in text
-        or "Err #" in text
-    )
+    return "Too many requests" in text or "#ipd3" in text or "Err #" in text
 
 
 def _is_cf_challenge(text: str) -> bool:
@@ -208,7 +204,11 @@ class ZlibClient:
             async with session.request(method, url, data=data, **kwargs) as resp:
                 # 强制 UTF-8 解码：Z-Library 响应头常缺失 charset，aiohttp 会误判为 latin-1
                 text = await resp.text(encoding="utf-8", errors="replace")
-        except (aiohttp.ClientConnectorError, aiohttp.ServerTimeoutError, asyncio.TimeoutError) as e:
+        except (
+            aiohttp.ClientConnectorError,
+            aiohttp.ServerTimeoutError,
+            asyncio.TimeoutError,
+        ) as e:
             raise ZlibError(
                 "network_error",
                 "网络异常（连接失败或超时）",
@@ -249,6 +249,7 @@ class ZlibClient:
                 "Z-Library 返回了无法解析的内容",
                 text[:200],
             )
+
     # ---------- 账号与登录 ----------
 
     async def _apply_login_response(self, account: Account, resp: dict):
@@ -262,7 +263,9 @@ class ZlibClient:
         user = resp.get("user") or {}
         account.email = user.get("email", account.email)
         account.remix_userid = str(user.get("id", account.remix_userid))
-        account.remix_userkey = str(user.get("remix_userkey", account.remix_userkey) or "")
+        account.remix_userkey = str(
+            user.get("remix_userkey", account.remix_userkey) or ""
+        )
         account.downloads_today = int(user.get("downloads_today", 0))
         account.downloads_limit = int(user.get("downloads_limit", 10))
         account.logged_in = True
@@ -290,7 +293,9 @@ class ZlibClient:
                 "auth_failed",
                 f"账号 {account.name} 缺少凭据：需填 email+password 或 remix_userid+remix_userkey",
             )
-        logger.info(f"账号 {account.name} 登录成功，今日已用 {account.downloads_today}/{account.downloads_limit} 次下载")
+        logger.info(
+            f"账号 {account.name} 登录成功，今日已用 {account.downloads_today}/{account.downloads_limit} 次下载"
+        )
         return account
 
     async def login_all(self):
@@ -312,7 +317,11 @@ class ZlibClient:
         """挑选用于下载的账号：今日剩余额度最多者；无额度则抛 quota_exhausted。"""
         candidates = [a for a in self.pool if a.logged_in and a.has_quota()]
         if not candidates:
-            used = [f"{a.name}({a.downloads_today}/{a.downloads_limit})" for a in self.pool if a.logged_in]
+            used = [
+                f"{a.name}({a.downloads_today}/{a.downloads_limit})"
+                for a in self.pool
+                if a.logged_in
+            ]
             raise ZlibError(
                 "quota_exhausted",
                 "账号池今日下载额度已全部用完（每个账号每日 10 次）",
@@ -340,9 +349,7 @@ class ZlibClient:
             data["languages[]"] = language
         if extension:
             data["extensions[]"] = extension
-        resp = await self._request_json(
-            "POST", EP_SEARCH, account=account, data=data
-        )
+        resp = await self._request_json("POST", EP_SEARCH, account=account, data=data)
         if not resp.get("success"):
             raise ZlibError(
                 "api_error",
@@ -373,12 +380,16 @@ class ZlibClient:
 
     # ---------- 下载 ----------
 
-    async def get_download_link(self, account: Account, book: dict) -> tuple[str, str, str]:
+    async def get_download_link(
+        self, account: Account, book: dict
+    ) -> tuple[str, str, str]:
         """获取下载直链。返回 (download_url, filename, extension)。"""
         book_id = book.get("id")
         hash_id = book.get("hash")
         if not book_id or not hash_id:
-            raise ZlibError("api_error", "书籍信息缺少 id/hash，无法下载", str(book)[:200])
+            raise ZlibError(
+                "api_error", "书籍信息缺少 id/hash，无法下载", str(book)[:200]
+            )
         resp = await self._request_json(
             "GET",
             EP_FILE.format(book_id=book_id, hash_id=hash_id),
@@ -406,13 +417,11 @@ class ZlibClient:
         返回 (account, filename, file_bytes)。自动挑选额度账号并扣减额度。
         """
         account = self.pick_download_account()
-        dl, filename, ext = await self.get_download_link(account, book)
+        dl, filename, _ext = await self.get_download_link(account, book)
 
         session = await self._get_session()
         try:
-            async with session.get(
-                dl, proxy=self.proxy, ssl=False
-            ) as resp:
+            async with session.get(dl, proxy=self.proxy, ssl=False) as resp:
                 if resp.status != 200:
                     raise ZlibError(
                         "api_error",
@@ -420,7 +429,11 @@ class ZlibClient:
                         dl[:200],
                     )
                 content = await resp.read()
-        except (aiohttp.ClientConnectorError, aiohttp.ServerTimeoutError, asyncio.TimeoutError) as e:
+        except (
+            aiohttp.ClientConnectorError,
+            aiohttp.ServerTimeoutError,
+            asyncio.TimeoutError,
+        ) as e:
             raise ZlibError("network_error", "下载网络异常", str(e))
         except aiohttp.ClientError as e:
             raise ZlibError("network_error", "下载失败", str(e))
@@ -429,7 +442,9 @@ class ZlibClient:
             raise ZlibError("api_error", "下载到的文件为空", dl[:200])
         # 扣减额度
         account.downloads_today += 1
-        logger.info(f"下载成功: {filename} ({len(content)} bytes)，账号 {account.name} 剩余 {account.downloads_left} 次")
+        logger.info(
+            f"下载成功: {filename} ({len(content)} bytes)，账号 {account.name} 剩余 {account.downloads_left} 次"
+        )
         return account, filename, content
 
     # ---------- 状态 ----------

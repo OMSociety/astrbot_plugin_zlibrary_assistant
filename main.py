@@ -29,7 +29,13 @@ def _parse_accounts(config: AstrBotConfig) -> list[dict]:
             if not isinstance(acc, dict):
                 continue
             item = {"name": str(acc.get("name", "account"))}
-            item.update({k: v for k, v in acc.items() if k != "__template_key" and v is not None})
+            item.update(
+                {
+                    k: v
+                    for k, v in acc.items()
+                    if k != "__template_key" and v is not None
+                }
+            )
             accounts.append(item)
     elif isinstance(raw, dict):
         # 兼容旧结构（键=备注名，值=账号配置）
@@ -73,7 +79,7 @@ class ZLibraryAssistantPlugin(Star):
         try:
             await self.client.login_all()
             logger.info("ZLibrary 账号池登录完成")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 后台登录失败不应阻塞插件启动
             logger.warning(f"ZLibrary 账号池后台登录失败: {e}")
 
     async def terminate(self):
