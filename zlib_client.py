@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from dataclasses import dataclass, field
 
 import aiohttp
 
-logger = logging.getLogger("astrbot.plugin.zlibrary_assistant")
+# 使用 AstrBot 插件 logger（与插件日志格式一致，避免 loguru record 缺字段）
+from astrbot.api import logger
 
 # 各端点（域名由配置提供，前缀 https://{domain}）
 EP_LOGIN = "/eapi/user/login"
@@ -153,6 +153,8 @@ class ZlibClient:
             )
         self._session: aiohttp.ClientSession | None = None
         self._session_lock = asyncio.Lock()
+        # 搜索结果的书籍缓存：id -> book dict（下载时按 id 取完整信息，含 hash）
+        self.book_cache: dict[int, dict] = {}
 
     # ---------- 会话管理 ----------
 
@@ -348,7 +350,26 @@ class ZlibClient:
                 json.dumps(resp, ensure_ascii=False)[:200],
             )
         books = resp.get("books") or []
+        # 缓存书籍信息（供 download_by_id 使用）
+        for b in books:
+            try:
+                self.book_cache[int(b["id"])] = b
+            except (KeyError, TypeError, ValueError):
+                continue
         return books
+
+    async def download_by_id(self, book_id: int) -> tuple[Account, str, bytes]:
+        """按 id 下载书籍（id 必须来自之前 search 的结果缓存）。
+
+        若缓存中无该书（例如 AstrBot 重启后），抛 ZlibError 提示先搜索。
+        """
+        book = self.book_cache.get(int(book_id))
+        if book is None:
+            raise ZlibError(
+                "api_error",
+                f"没有 id={book_id} 的书籍信息（AstrBot 重启后缓存会清空），请先调用 zlib_search_books 搜索",
+            )
+        return await self.download(book)
 
     # ---------- 下载 ----------
 

@@ -1,23 +1,39 @@
 {
   "accounts": {
-    "description": "Z-Library 账号池。每个键是一个账号的备注名（如 account1），值支持两种填法：① email+password；② remix_userid+remix_userkey（成对填写，可直接在 Z-Library 个人页获取）。",
-    "type": "object",
-    "items": {
-      "email": {
-        "description": "Z-Library 账号邮箱",
-        "type": "string"
-      },
-      "password": {
-        "description": "账号密码",
-        "type": "string"
-      },
-      "remix_userid": {
-        "description": "（备选填法）remix_userid，需与 remix_userkey 成对",
-        "type": "string"
-      },
-      "remix_userkey": {
-        "description": "（备选填法）remix_userkey",
-        "type": "string"
+    "type": "template_list",
+    "description": "Z-Library 账号池：每个条目一个账号，可添加多个。每个账号每日独立下载额度（免费约 10 次/天），下载时自动轮换到额度最多的账号。",
+    "templates": {
+      "account": {
+        "name": "账号",
+        "hint": "Z-Library 账号",
+        "display_item": "name",
+        "items": {
+          "name": {
+            "description": "账号备注名（用于日志区分）",
+            "type": "string",
+            "default": "account"
+          },
+          "email": {
+            "description": "Z-Library 账号邮箱（与密码成对填写，登录后自动换取 remix 凭证）",
+            "type": "string",
+            "default": ""
+          },
+          "password": {
+            "description": "账号密码",
+            "type": "string",
+            "default": ""
+          },
+          "remix_userid": {
+            "description": "备选填法：remix_userid（与 remix_userkey 成对，可在 Z-Library 个人页获取）",
+            "type": "string",
+            "default": ""
+          },
+          "remix_userkey": {
+            "description": "备选填法：remix_userkey",
+            "type": "string",
+            "default": ""
+          }
+        }
       }
     }
   },
