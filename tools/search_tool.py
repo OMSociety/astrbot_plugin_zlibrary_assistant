@@ -20,7 +20,9 @@ from ..zlib_client import ZlibClient, ZlibError
 
 MAX_COVER_CARDS = 8  # 渲染卡片的上限，防止图片过大
 COVER_DOWNLOAD_CONCURRENCY = 8  # 封面下载并发数（8 本一轮并发跑完）
-CARD_RENDER_TIMEOUT = 25  # 卡片渲染最长等待（秒）；超时降级纯文本，避免吃掉工具整体超时预算
+CARD_RENDER_TIMEOUT = (
+    25  # 卡片渲染最长等待（秒）；超时降级纯文本，避免吃掉工具整体超时预算
+)
 
 
 async def _attach_covers(client: ZlibClient, books: list[dict]) -> list[dict]:
@@ -97,7 +99,9 @@ async def _render_book_card(books: list[dict], query: str) -> str | None:
         )
         return img_path
     except Exception as e:  # noqa: BLE001 - 渲染失败/超时需降级，不向上抛
-        logger.warning(f"搜索结果卡片渲染失败或超时（{CARD_RENDER_TIMEOUT}s），降级为纯文本: {e}")
+        logger.warning(
+            f"搜索结果卡片渲染失败或超时（{CARD_RENDER_TIMEOUT}s），降级为纯文本: {e}"
+        )
         return None
 
 
@@ -179,7 +183,9 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
         # 注意：不通过 ImageContent 返回（纯文本模型如 deepseek-chat 会因 image_url 报 400），
         # 而是给出图片路径，由 LLM 用 send_message_to_user(type=image) 发送给用户。
         cards = books[:MAX_COVER_CARDS]
-        await _attach_covers(self.client, cards)  # 封面转 base64 内嵌，修复云端渲染器无法加载外链
+        await _attach_covers(
+            self.client, cards
+        )  # 封面转 base64 内嵌，修复云端渲染器无法加载外链
         img_path = await _render_book_card(cards, query)
         if img_path:
             text += (

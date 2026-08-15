@@ -184,7 +184,7 @@ def _normalize_domain(domain: str) -> str:
     d = domain.strip()
     for prefix in ("https://", "http://"):
         if d.lower().startswith(prefix):
-            d = d[len(prefix):]
+            d = d[len(prefix) :]
             break
     return d.strip("/")
 
@@ -500,7 +500,9 @@ class ZlibClient:
         self._save_book_cache()
         return books
 
-    async def fetch_cover_base64(self, url: str, max_bytes: int = 1024 * 1024) -> tuple[str, str]:
+    async def fetch_cover_base64(
+        self, url: str, max_bytes: int = 1024 * 1024
+    ) -> tuple[str, str]:
         """下载封面图并转成 base64 data URI，供 HTML 卡片内嵌。
 
         背景：AstrBot 云端文转图服务在远程服务器渲染模板，访问不了
@@ -519,7 +521,9 @@ class ZlibClient:
         mime = _guess_image_mime(compressed)
         return f"data:{mime};base64,{base64.b64encode(compressed).decode('ascii')}", ""
 
-    async def _download_cover(self, url: str, max_bytes: int) -> tuple[bytes | None, str]:
+    async def _download_cover(
+        self, url: str, max_bytes: int
+    ) -> tuple[bytes | None, str]:
         """下载封面图片，返回 (内容, 错误信息)；失败时内容为 None。
 
         请求统一带账号池第一个账号的 cookies（封面 CDN 需要登录态，
