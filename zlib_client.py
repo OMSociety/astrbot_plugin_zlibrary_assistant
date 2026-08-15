@@ -303,6 +303,17 @@ class ZlibClient:
             cookies["remix_userkey"] = account.remix_userkey
         return cookies
 
+    def _cover_cookies(self) -> dict | None:
+        """封面下载用的 cookies：取账号池第一个账号的登录凭证。
+
+        封面 CDN（covers.z-lib.sk 等）要求登录态，裸请求会被拒
+        （HTTP 513）；搜索能成功正是因为 E-API 请求带了账号 cookies。
+        没配置账号时返回 None（匿名请求）。
+        """
+        if not self.pool:
+            return None
+        return self._cookies(self.pool[0])
+
     async def _request_json(
         self,
         method: str,
@@ -540,14 +551,21 @@ class ZlibClient:
         return f"data:{mime};base64,{base64.b64encode(compressed).decode('ascii')}"
 
     async def _download_cover(self, url: str, max_bytes: int) -> tuple[bytes | None, str]:
-        """下载封面图片，返回 (内容, 错误信息)；失败时内容为 None。"""
+        """下载封面图片，返回 (内容, 错误信息)；失败时内容为 None。
+
+        请求统一带账号池第一个账号的 cookies（封面 CDN 需要登录态，
+        否则返回 HTTP 513）；没配置账号时不带。
+        """
         session = await self._get_session()
+        kwargs: dict = {"proxy": self.proxy, "ssl": False}
+        cover_cookies = self._cover_cookies()
+        if cover_cookies:
+            kwargs["cookies"] = cover_cookies
         try:
             async with session.get(
                 url,
-                proxy=self.proxy,
-                ssl=False,
                 timeout=aiohttp.ClientTimeout(total=8),
+                **kwargs,
             ) as resp:
                 if resp.status != 200:
                     return None, f"HTTP {resp.status}"
