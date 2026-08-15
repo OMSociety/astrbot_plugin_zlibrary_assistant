@@ -30,3 +30,4 @@
 - 下载文件名清洗：替换 Windows 非法字符（`\ / : * ? " < > |`）与控制字符，避免保存文件失败
 - 移除 `@register` 装饰器：插件标识统一由 `metadata.yaml` 驱动（消除装饰器与 metadata 的 name/version 不一致）
 - `initialize()` 增加防重入守卫；删除 `_request_json` 死参数 `allow_html`；ruff 规范化导入排序；`.gitignore` 排除 `.ruff_cache/`
+- **搜索结果封面修复**：封面在插件端下载并转 base64 内嵌进卡片 HTML（云端文转图服务访问不了 Z-Library 封面 CDN 外链，此前实测封面全部显示占位）

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from mcp.types import CallToolResult, TextContent
@@ -18,6 +19,28 @@ from ..templates import SEARCH_CARD_TMPL
 from ..zlib_client import ZlibClient, ZlibError
 
 MAX_COVER_CARDS = 8  # 渲染卡片的上限，防止图片过大
+COVER_DOWNLOAD_CONCURRENCY = 4  # 封面下载并发数（避免触发 Z-Library 风控）
+
+
+async def _attach_covers(client: ZlibClient, books: list[dict]) -> list[dict]:
+    """并发下载封面并内嵌为 base64 data URI（渲染不再依赖外链）。
+
+    背景：AstrBot 云端文转图服务访问不了 Z-Library 封面 CDN，直接引用
+    外链会全部加载失败；先在本机（走配置代理）下载封面转 base64 内嵌，
+    云端渲染器即可正常显示。下载失败的书 cover 置空，模板自动显示占位。
+    """
+    sem = asyncio.Semaphore(COVER_DOWNLOAD_CONCURRENCY)
+
+    async def fetch(b: dict) -> dict:
+        url = b.get("cover", "")
+        if not url or not url.startswith(("http://", "https://")):
+            return b  # 无封面或已是 data URI 的条目直接跳过
+        async with sem:
+            data_uri = await client.fetch_cover_base64(url)
+        b["cover"] = data_uri if data_uri else ""
+        return b
+
+    return await asyncio.gather(*(fetch(b) for b in books))
 
 
 def _book_text_lines(books: list[dict]) -> list[str]:
@@ -128,7 +151,9 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
         # 渲染 HTML 卡片图片（封面/标题/作者/格式），保存到本地文件
         # 注意：不通过 ImageContent 返回（纯文本模型如 deepseek-chat 会因 image_url 报 400），
         # 而是给出图片路径，由 LLM 用 send_message_to_user(type=image) 发送给用户。
-        img_path = await _render_book_card(books[:MAX_COVER_CARDS], query)
+        cards = books[:MAX_COVER_CARDS]
+        await _attach_covers(self.client, cards)  # 封面转 base64 内嵌，修复云端渲染器无法加载外链
+        img_path = await _render_book_card(cards, query)
         if img_path:
             text += (
                 f"\n\n已生成搜索结果卡片图片（含封面）：{img_path}\n"
