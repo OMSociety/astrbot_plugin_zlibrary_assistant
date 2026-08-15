@@ -114,7 +114,7 @@ IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常 全部分�
 | 配置项 | 类型 | 默认 | 说明 |
 |--------|------|------|------|
 | `domain` | string | `z-library.sk` | Z-Library E-API 域名。域名可能被没收/变动，失效时在此更换。**无需带 `https://` 前缀**，插件会自动处理（常见问题 Q3 有验证方法） |
-| `proxy` | string | `""` | HTTP 代理（可选）。服务器在国内访问 Z-Library 时需要，如 `http://127.0.0.1:7897` |
+| `proxy` | string | `""` | HTTP 代理（可选）。服务器在国内访问 Z-Library 时需要，如 `http://127.0.0.1:7897`；代理需账号密码时用 `http://用户名:密码@IP:端口` |
 
 ### 搜索设置
 
@@ -288,7 +288,7 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 **原因**：Docker 容器是独立网络环境，配置里填 `http://127.0.0.1:7897` 指向的是**容器自己**（里面没有你的代理），封面下载全部失败（显示占位），且云端文转图在容器内可能连不上，渲染拖满整个工具超时（AstrBot 默认 `tool_call_timeout` 60 秒）。
 
 **解决**：
-1. **代理填宿主机可达地址**：Windows/Mac 用 `http://host.docker.internal:7897`；Linux 用宿主机局域网 IP（如 `http://192.168.1.100:7897`），并确保 Clash 开启了「允许局域网连接」
+1. **代理填容器能访问到的地址**：格式 `http://IP:端口`；代理需要账号密码时用 `http://用户名:密码@IP:端口`（如 `http://slandre:hj282102338@astrbot:7080`），插件基于 aiohttp，自动发送 `Proxy-Authorization` 认证头。Windows/Mac Docker Desktop 可用 `http://host.docker.internal:端口`；Linux 用宿主机局域网 IP，并确保代理软件开启了「允许局域网连接」
 2. 若云端文转图不可达：插件已内置**25 秒渲染超时保护**，渲染失败会自动降级为纯文本书单（不会整个工具报错），可接受的话无需处理
 3. 仍嫌时间紧：在 AstrBot 配置 `provider_settings.tool_call_timeout` 调大（如 `120`）
 

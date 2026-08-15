@@ -53,7 +53,7 @@
     "description": "HTTP 代理（可选）",
     "type": "string",
     "default": "",
-    "hint": "服务器在国内访问 Z-Library 必须填写，格式 http://IP:端口，如 http://127.0.0.1:7897。境外服务器可留空"
+    "hint": "服务器在国内访问 Z-Library 必须填写，格式 http://IP:端口，如 http://127.0.0.1:7897；代理需要账号密码时填 http://用户名:密码@IP:端口（如 http://user:pass@proxy:7080）。境外服务器可留空"
   },
   "search_limit": {
     "description": "搜索默认返回条数",
