@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from dataclasses import dataclass
 
 import aiohttp
@@ -123,6 +124,30 @@ def _fix_mojibake_recursive(obj):
     return obj
 
 
+def _sanitize_filename(filename: str) -> str:
+    """清洗文件名为跨平台安全格式。
+
+    书名可能含 Windows 非法字符（\\ / : * ? " < > |）或控制字符，
+    直接保存会触发 OSError；统一替换为下划线，并去掉首尾点/空格。
+    """
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", filename).strip(" .")
+    return cleaned or "book"
+
+
+def _normalize_domain(domain: str) -> str:
+    """规范化域名配置：去掉 http(s):// 协议前缀与多余斜杠。
+
+    用户可能从浏览器地址栏复制带协议的域名（如 https://z-library.sk/），
+    若不处理会拼出 https://https://z-library.sk 的无效 URL。
+    """
+    d = domain.strip()
+    for prefix in ("https://", "http://"):
+        if d.lower().startswith(prefix):
+            d = d[len(prefix):]
+            break
+    return d.strip("/")
+
+
 class ZlibClient:
     """Z-Library E-API 异步客户端。"""
 
@@ -133,7 +158,7 @@ class ZlibClient:
         proxy: str = "",
         timeout: float = 30.0,
     ):
-        self.domain = domain.strip().lstrip("/")
+        self.domain = _normalize_domain(domain)
         self.proxy = proxy or None
         self.timeout = timeout
         self.pool: list[Account] = []
@@ -171,7 +196,7 @@ class ZlibClient:
         try:
             path = self._cache_file()
             if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                     self.book_cache = {int(k): v for k, v in data.items()}
         except Exception:  # noqa: BLE001 - 缓存损坏不影响运行
@@ -227,7 +252,6 @@ class ZlibClient:
         account: Account | None = None,
         data: dict | None = None,
         params: dict | None = None,
-        allow_html: bool = False,
     ) -> dict:
         """发请求并解析 JSON；对常见异常做分类。"""
         session = await self._get_session()
@@ -280,8 +304,6 @@ class ZlibClient:
         try:
             return _fix_mojibake_recursive(json.loads(text))
         except json.JSONDecodeError:
-            if allow_html:
-                return {"_raw": text}
             raise ZlibError(
                 "api_error",
                 "Z-Library 返回了无法解析的内容",
@@ -468,6 +490,7 @@ class ZlibClient:
         description = file_info.get("description", "")
         # 描述形如 "书名-作者 (z-library.sk...)"，清理成文件名
         filename = description.split(" (")[0].strip() or f"book_{book_id}"
+        filename = _sanitize_filename(filename)
         if not filename.endswith("." + ext):
             filename = f"{filename}.{ext}"
         return dl, filename, ext

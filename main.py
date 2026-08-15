@@ -12,7 +12,7 @@
 import asyncio
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star
 
 from .tools.download_tool import ZlibDownloadBookTool
 from .tools.search_tool import ZlibSearchBooksTool
@@ -48,12 +48,6 @@ def _parse_accounts(config: AstrBotConfig) -> list[dict]:
     return accounts
 
 
-@register(
-    "astrbot_plugin_zlibrary_assistant",
-    "OMSociety",
-    "Z-Library 图书搜索与下载工具（LLM 自动调用，账号池，HTML 卡片结果）",
-    "0.1.0",
-)
 class ZLibraryAssistantPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -77,6 +71,10 @@ class ZLibraryAssistantPlugin(Star):
 
     async def initialize(self):
         """插件初始化：后台预登录账号池（失败不阻塞启动）。"""
+        # 防重入：插件更新/重载导致 initialize 被重复调用时，跳过已在运行的登录任务
+        if self._login_task is not None and not self._login_task.done():
+            logger.info("账号池登录任务已在运行，跳过重复初始化")
+            return
         self._login_task = asyncio.create_task(self._background_login())
 
     async def _background_login(self):
