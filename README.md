@@ -2,7 +2,7 @@
 
 <img src="logo.png" width="120" alt="ZLibrary Assistant Logo" />
 
-# 📚 ZLibrary Assistant 电子书助手
+# 📚 Zlibrary 助手
 
 **Z-Library 图书搜索与下载助手** —— 图书搜索 · 一键下载 · 账号池轮换 · HTML 卡片结果 · 额度管控
 
