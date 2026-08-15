@@ -41,7 +41,10 @@ async def _attach_covers(client: ZlibClient, books: list[dict]) -> list[dict]:
         b["cover"] = data_uri if data_uri else ""
         return b
 
-    return await asyncio.gather(*(fetch(b) for b in books))
+    books = await asyncio.gather(*(fetch(b) for b in books))
+    total = sum(1 for b in books if str(b.get("cover", "")).startswith("data:"))
+    logger.info(f"封面下载完成：成功 {total}/{len(books)} 张（失败的书显示占位）")
+    return books
 
 
 def _book_text_lines(books: list[dict]) -> list[str]:
