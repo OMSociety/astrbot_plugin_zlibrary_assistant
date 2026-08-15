@@ -19,6 +19,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 from PIL import Image
@@ -42,6 +43,10 @@ DEFAULT_HEADERS = {
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ),
 }
+
+# 封面 CDN 兜底域名：Z-Library 封面图由独立 CDN 提供（如 covers.zlibcdn2.com），
+# 该域名经常不可达；原 URL 下载失败时依次替换为这些域名重试（实测 z-lib.fm 可达）
+COVER_FALLBACK_HOSTS = ("z-lib.fm",)
 
 # 错误分类（category）：
 #   network_error    网络异常（超时/连接失败/代理错误）
@@ -135,6 +140,19 @@ def _sanitize_filename(filename: str) -> str:
     """
     cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", filename).strip(" .")
     return cleaned or "book"
+
+
+def _replace_host(url: str, new_host: str) -> str | None:
+    """替换 URL 的主机名（封面 CDN 域名失效时切换镜像域名重试）。"""
+    try:
+        p = urlparse(url)
+        if not p.hostname:
+            return None
+        return urlunparse(
+            (p.scheme or "https", new_host, p.path, p.params, p.query, p.fragment)
+        )
+    except Exception:  # noqa: BLE001 - 无法解析的 URL 返回 None
+        return None
 
 
 def _guess_image_mime(content: bytes) -> str:
@@ -495,12 +513,34 @@ class ZlibClient:
         背景：AstrBot 云端文转图服务在远程服务器渲染模板，访问不了
         Z-Library 封面 CDN 外链（实测封面全部加载失败）；把封面以
         base64 内嵌进 HTML 后，渲染不再依赖外网。
-        下载后先缩放压缩（卡片显示宽仅 84px），再按文件头魔数判断
-        真实图片类型，避免 CDN 响应头缺失/错误导致解码失败。
-        失败返回空字符串（调用方降级为占位图），原因记 debug 日志。
+        原 URL 下载失败时自动把域名替换为可达镜像（COVER_FALLBACK_HOSTS）重试；
+        下载后缩放压缩，按文件头魔数判断真实图片类型。
+        失败返回空字符串（调用方降级为占位图），原因记 WARNING 日志。
         """
         if not url or not url.startswith(("http://", "https://")):
             return ""
+        candidates = [url]
+        for host in COVER_FALLBACK_HOSTS:
+            alt = _replace_host(url, host)
+            if alt and alt not in candidates:
+                candidates.append(alt)
+        content: bytes | None = None
+        last_err = "未知错误"
+        for cand in candidates:
+            content, last_err = await self._download_cover(cand, max_bytes)
+            if content:
+                break
+        if not content:
+            logger.warning(
+                f"封面下载失败（已尝试 {len(candidates)} 个地址）: {url[:100]} - {last_err}"
+            )
+            return ""
+        compressed = _resize_cover(content)
+        mime = _guess_image_mime(compressed)
+        return f"data:{mime};base64,{base64.b64encode(compressed).decode('ascii')}"
+
+    async def _download_cover(self, url: str, max_bytes: int) -> tuple[bytes | None, str]:
+        """下载封面图片，返回 (内容, 错误信息)；失败时内容为 None。"""
         session = await self._get_session()
         try:
             async with session.get(
@@ -510,22 +550,15 @@ class ZlibClient:
                 timeout=aiohttp.ClientTimeout(total=8),
             ) as resp:
                 if resp.status != 200:
-                    logger.debug(f"封面下载失败: HTTP {resp.status} - {url[:80]}")
-                    return ""
+                    return None, f"HTTP {resp.status}"
                 content = await resp.read()
                 if not content:
-                    logger.debug(f"封面下载为空: {url[:80]}")
-                    return ""
+                    return None, "空内容"
                 if len(content) > max_bytes:
-                    logger.debug(f"封面过大({len(content)}B)，跳过: {url[:80]}")
-                    return ""
-        except Exception as e:  # noqa: BLE001 - 封面下载失败不影响搜索
-            logger.debug(f"封面下载异常: {url[:80]} - {e}")
-            return ""
-
-        compressed = _resize_cover(content)
-        mime = _guess_image_mime(compressed)
-        return f"data:{mime};base64,{base64.b64encode(compressed).decode('ascii')}"
+                    return None, f"文件过大({len(content)}B)"
+                return content, ""
+        except Exception as e:  # noqa: BLE001 - 下载失败由调用方统一处理
+            return None, f"{type(e).__name__}: {e}"
 
     async def download_by_id(self, book_id: int) -> tuple[Account, str, bytes]:
         """按 id 下载书籍（id 必须来自之前 search 的结果缓存，缓存已持久化）。
