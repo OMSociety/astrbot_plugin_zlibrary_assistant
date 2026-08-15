@@ -28,7 +28,8 @@ SEARCH_CARD_TMPL = """<!DOCTYPE html>
     margin-bottom: 14px;
     padding-left: 2px;
   }
-  .header b { color: #374151; }  .card {
+  .header b { color: #374151; }
+  .card {
     display: flex;
     align-items: center;
     background: #ffffff;
