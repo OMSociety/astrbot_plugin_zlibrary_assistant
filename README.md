@@ -1,14 +1,35 @@
-# ZLibrary Assistant 电子书助手
+<div align="center">
 
-[![Version](https://img.shields.io/badge/version-v1.0.1-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+<img src="logo.png" width="120" alt="ZLibrary Assistant Logo" />
+
+# 📚 ZLibrary Assistant 电子书助手
+
+**Z-Library 图书搜索与下载助手** —— 图书搜索 · 一键下载 · 账号池轮换 · HTML 卡片结果 · 额度管控
+
+[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
+[![Issues](https://img.shields.io/github/issues/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues)
 
-为 Astrbot 提供 Z-Library 图书搜索与下载能力（账号池、HTML 卡片结果、额度管控）。
+[✨ 核心特性](#-核心特性) • [📖 功能概览](#-功能概览) • [🚀 快速开始](#-快速开始) • [⚙️ 配置项说明](#️-配置项说明) • [🛠️ LLM 可调用工具](#️-llm-可调用工具) • [🧩 架构](#-架构) • [🔧 常见问题](#-常见问题) • [📝 更新日志](CHANGELOG.md)
 
-> 本项目由AI编写
+</div>
 
-[快速开始](#-快速开始) • [功能概览](#-功能概览) • [配置项](#-配置项说明) • [LLM 工具](#-llm-可调用工具) • [常见问题](#-常见问题) • [更新日志](CHANGELOG.md)
+> 🎨 本项目由 AI 编写
+
+---
+
+## ✨ 核心特性
+
+| 特性 | 说明 |
+|------|------|
+| 🔍 **图书搜索** | 关键词搜索 Z-Library（3300 万+ 本书），返回 HTML 卡片图片（封面/标题/作者/格式/大小）+ 带 id 的文本列表 |
+| 📥 **一键下载** | 说一声就下载，文件自动发送到会话，支持 pdf / epub / mobi 等格式 |
+| 👥 **账号池轮换** | 多账号共享每日下载额度，自动挑选剩余额度最多的账号，耗尽拒绝并友好提示 |
+| 🔑 **双凭据方式** | `remix_userid+remix_userkey`（绕开 login 端点风控）或 `email+password`（自动换取 remix 凭证） |
+| 🎴 **HTML 卡片结果** | 搜索结果渲染为统一卡片图片，封面加载失败自动降级渐变占位，卡片不空白 |
+| 🛡️ **错误分类** | IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常全部分类处理，友好中文提示，插件不崩溃 |
 
 ---
 
@@ -16,16 +37,20 @@
 
 ### 图书搜索
 聊天中直接说想找什么书，LLM 自动调用搜索工具，返回 **HTML 卡片图片**（封面/标题/作者/格式/大小）和带 id 的文本列表：
+
 ```
 用户: 帮我找一本马克思的《资本论》
-LLM: → 自动搜索 → 发送卡片图 → 列出前几本
+🤖 → zlib_search_books(query=资本论)
+    搜索「资本论」命中 N 本，卡片图已发送 ✅
 ```
 
 ### 图书下载
 说一声就能下载，文件自动发送到会话：
+
 ```
 用户: 下载第 1 本
-LLM: → 自动下载 → 发送 PDF/EPUB 文件 → 告知剩余额度
+🤖 → zlib_download_book(book_id=搜索结果中的id)
+    下载完成 ✅ 已发送 PDF 文件，账号剩余额度 9 次
 ```
 
 ### 账号池与额度管控
@@ -49,21 +74,25 @@ IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常 全部分�
 - AstrBot WebUI → 插件市场 → 通过 GitHub 安装 `astrbot_plugin_zlibrary_assistant`
 
 **方式二：手动安装**
-- 将插件文件夹放入 `/AstrBot/data/plugins/`
-- 重启 AstrBot
-- 在管理面板按需配置各项参数
+1. 将插件文件夹放入 `/AstrBot/data/plugins/`
+2. 重启 AstrBot
+3. 在管理面板按需配置各项参数
 
-### 第二步：配置账号
+### 第二步：最小配置（跑通搜索与下载）
 
-在 AstrBot WebUI 插件配置页填写 Z-Library 账号：
+只需在 WebUI 插件配置页的 `accounts` 里添加一个账号（推荐 remix 方式）：
 
 1. 打开插件配置页 → `accounts` 点击添加账号条目
-2. **推荐方式**：填 `remix_userid` + `remix_userkey`（在 Z-Library 个人页/客户端获取，长期有效，不受 login 端点风控影响）
+2. **推荐方式**：填 `remix_userid` + `remix_userkey`（浏览器登录 z-library.sk 后按 F12 → Cookie 里复制，长期有效，不受 login 端点风控影响）
 3. 或填 `email` + `password`（登录后自动换取 remix 凭证）
 4. 如需多个账号，继续添加条目（账号池自动轮换）
 
+保存后重启 AstrBot，即可在对话中直接搜书、下载。
+
+> 💡 国内服务器需在 `proxy` 填代理（如 `http://127.0.0.1:7897`），境外服务器可留空。
+
 ### 依赖安装
-插件仅依赖 `aiohttp`（异步 HTTP 库），AstrBot 安装插件时自动处理，无需额外安装。
+插件仅依赖 `aiohttp` + `aiofiles`（异步 HTTP/文件库），AstrBot 安装插件时自动处理，无需额外安装。
 
 ---
 
@@ -77,49 +106,62 @@ IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常 全部分�
 | `accounts[].name` | string | `account` | 账号备注名（用于日志区分） |
 | `accounts[].email` | string | `""` | 账号邮箱（与 password 成对） |
 | `accounts[].password` | string | `""` | 账号密码 |
-| `accounts[].remix_userid` | string | `""` | remix_userid（与 remix_userkey 成对） |
-| `accounts[].remix_userkey` | string | `""` | remix_userkey |
+| `accounts[].remix_userid` | string | `""` | remix_userid（与 remix_userkey 成对，推荐） |
+| `accounts[].remix_userkey` | string | `""` | remix_userkey（推荐） |
 
 ### 连接设置
 
 | 配置项 | 类型 | 默认 | 说明 |
 |--------|------|------|------|
-| `domain` | string | `z-library.sk` | Z-Library E-API 域名。域名可能被没收/变动，失效时在此更换（README 常见问题 Q3 有验证方法） |
+| `domain` | string | `z-library.sk` | Z-Library E-API 域名。域名可能被没收/变动，失效时在此更换。**无需带 `https://` 前缀**，插件会自动处理（常见问题 Q3 有验证方法） |
 | `proxy` | string | `""` | HTTP 代理（可选）。服务器在国内访问 Z-Library 时需要，如 `http://127.0.0.1:7897` |
 
 ### 搜索设置
 
 | 配置项 | 类型 | 默认 | 说明 |
 |--------|------|------|------|
-| `search_limit` | int | `5` | 搜索默认返回条数上限 |
+| `search_limit` | int | `5` | 搜索默认返回条数上限（LLM 不指定时使用，范围 1-8） |
 
----
+### 快速配置模板
 
-## 🧩 架构
+在 WebUI 配置面板填写，或参考以下结构（`data/config/astrbot_plugin_zlibrary_assistant_config.json`）：
 
-### eapi 客户端（zlib_client.py）
-Z-Library 安卓客户端内部接口（非官方 E-API）的异步封装：
-- 基于 aiohttp，符合 AstrBot 开发规范（异步、禁 requests）
-- 账号池：每账号独立额度状态，下载自动挑选剩余额度最多者
-- 错误分类：`rate_limited` / `auth_failed` / `quota_exhausted` / `domain_invalid` / `network_error` / `api_error`
-- 书籍缓存持久化到磁盘，AstrBot 重启后仍可凭 id 直接下载
-- mojibake 修复：Z-Library 返回的双重编码文本自动还原
-
-### 工具层（tools/）
-三个 `FunctionTool` 通过 `add_llm_tools` 注册，LLM 在对话中自动识别调用：
-- `search_tool.py` — 搜索 + HTML 卡片渲染（渲染失败自动降级纯文本）
-- `download_tool.py` — 按 id 下载到 `<data>/zlibrary_assistant/books/`，返回绝对路径
-- `status_tool.py` — 账号池健康度查询
-
-### 卡片渲染（templates.py）
-HTML + Jinja2 模板，走 AstrBot 内置文转图（`html_renderer`）：
-- CSS 字体栈，云端渲染自动选择中文字体，不依赖本地字体
-- 封面 `<img>` 引用 Z-Library CDN，加载失败自动露出渐变占位
-- 标题两行截断、作者单行省略，长列表排版稳定
+```json
+{
+  "accounts": [
+    {
+      "name": "account",
+      "email": "",
+      "password": "",
+      "remix_userid": "",
+      "remix_userkey": ""
+    }
+  ],
+  "domain": "z-library.sk",
+  "proxy": "",
+  "search_limit": 5
+}
+```
 
 ---
 
 ## 🛠️ LLM 可调用工具
+
+插件注册 3 个 LLM 工具，模型会自动判断何时调用，你只需用自然语言说需求：
+
+```
+用户: 帮我找一本马克思的《资本论》
+🤖 → zlib_search_books(query=资本论)
+    搜索「资本论」命中 N 本，卡片图已发送 ✅
+
+用户: 下载第 1 本
+🤖 → zlib_download_book(book_id=123456)
+    下载完成 ✅ 已发送 PDF 文件，账号剩余额度 9 次
+
+用户: 今天还能下载几本书？
+🤖 → zlib_get_status()
+    Z-Library 账号池状态：account1 ✅ 正常，今日下载 1/10 次
+```
 
 ### zlib_search_books
 关键词搜索 Z-Library 图书库，返回卡片图片 + 带 id 的文本列表。搜索**不消耗**下载额度。
@@ -127,7 +169,7 @@ HTML + Jinja2 模板，走 AstrBot 内置文转图（`html_renderer`）：
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `query` | string | **必填**，搜索关键词（书名/作者/主题，支持中英文） |
-| `limit` | int? | 返回条数上限（默认 5，最大 8） |
+| `limit` | int? | 返回条数上限（不传则用配置 `search_limit`，最大 8） |
 | `language` | string? | 语言过滤，如 `zh` / `en` / `fr` |
 | `extension` | string? | 格式过滤，如 `pdf` / `epub` / `mobi` |
 
@@ -144,6 +186,31 @@ HTML + Jinja2 模板，走 AstrBot 内置文转图（`html_renderer`）：
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | （无参数） | - | - |
+
+---
+
+## 🧩 架构
+
+### eapi 客户端（zlib_client.py）
+Z-Library 安卓客户端内部接口（非官方 E-API）的异步封装：
+- 基于 aiohttp，符合 AstrBot 开发规范（异步、禁 requests）
+- 账号池：每账号独立额度状态，下载自动挑选剩余额度最多者
+- 错误分类：`rate_limited` / `auth_failed` / `quota_exhausted` / `domain_invalid` / `network_error` / `api_error`
+- 书籍缓存持久化到磁盘，AstrBot 重启后仍可凭 id 直接下载
+- mojibake 修复：Z-Library 返回的双重编码文本自动还原
+- 域名自动规范化（剥掉 `http(s)://` 前缀）；下载文件名自动清洗 Windows 非法字符
+
+### 工具层（tools/）
+三个 `FunctionTool` 通过 `add_llm_tools` 注册，LLM 在对话中自动识别调用：
+- `search_tool.py` — 搜索 + HTML 卡片渲染（渲染失败自动降级纯文本）
+- `download_tool.py` — 按 id 下载到 `<data>/zlibrary_assistant/books/`，返回绝对路径
+- `status_tool.py` — 账号池健康度查询
+
+### 卡片渲染（templates.py）
+HTML + Jinja2 模板，走 AstrBot 内置文转图（`html_renderer`）：
+- CSS 字体栈，云端渲染自动选择中文字体，不依赖本地字体
+- 封面 `<img>` 引用 Z-Library CDN，加载失败自动露出渐变占位
+- 标题两行截断、作者单行省略，长列表排版稳定
 
 ---
 
@@ -176,7 +243,7 @@ Z-Library 对访问频率有严格风控（错误码 `#ipd3`），共享代理 I
 
 ### Q3：提示"当前域名可能已失效"？
 
-Z-Library 域名经常被没收/变动（实测常用域名中约一半已失效）。解决：在插件配置的 `domain` 项更换为当前可用域名（如 `z-library.sk`）。可用性可先访问 `https://<域名>/eapi/info` 验证（返回 JSON 即有效）。
+Z-Library 域名经常被没收/变动（实测常用域名中约一半已失效）。解决：在插件配置的 `domain` 项更换为当前可用域名（如 `z-library.sk`，**无需带 `https://` 前缀**）。可用性可先访问 `https://<域名>/eapi/info` 验证（返回 JSON 即有效）。
 
 ### Q4：下载提示"账号池额度已用完"？
 
@@ -214,7 +281,7 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 
 ### Q7：需要配置哪些依赖？
 
-插件仅依赖 `aiohttp`（异步 HTTP 库），AstrBot 安装插件时自动处理。文转图使用 AstrBot 内置能力，无需额外安装。
+插件仅依赖 `aiohttp` + `aiofiles`（异步 HTTP/文件库），AstrBot 安装插件时自动处理。文转图使用 AstrBot 内置能力，无需额外安装。
 
 ---
 
@@ -224,9 +291,13 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 
 ---
 
-## 🤝 贡献与反馈
+## ⭐ 支持本项目
 
-如遇问题请在 [GitHub Issues](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues) 提交，欢迎 Pull Request！
+如果这个插件对你有帮助，欢迎点亮 Star ⭐，有问题和建议请提交 [Issue](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues) 或 [Pull Request](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/pulls)。
+
+## 🙏 致谢
+
+- [AstrBot](https://github.com/AstrBotDevs/AstrBot) 开源聊天机器人框架
 
 ---
 
@@ -238,4 +309,4 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 
 ## 👤 作者
 
-[**@OMSociety**](https://github.com/OMSociety)
+[@OMSociety](https://github.com/OMSociety)
