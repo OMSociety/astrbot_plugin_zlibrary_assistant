@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.png" width="120" alt="ZLibrary Assistant Logo" />
+<img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="120" alt="ZLibrary Assistant Logo" />
 
 # 📚 Zlibrary 助手
 
