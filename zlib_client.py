@@ -449,7 +449,7 @@ class ZlibClient:
         self._save_book_cache()
         return books
 
-    async def fetch_cover_base64(self, url: str, max_bytes: int = 5 * 1024 * 1024) -> str:
+    async def fetch_cover_base64(self, url: str, max_bytes: int = 1024 * 1024) -> str:
         """下载封面图并转成 base64 data URI，供 HTML 卡片内嵌。
 
         背景：AstrBot 云端文转图服务在远程服务器渲染模板，访问不了
@@ -465,7 +465,7 @@ class ZlibClient:
                 url,
                 proxy=self.proxy,
                 ssl=False,
-                timeout=aiohttp.ClientTimeout(total=10),
+                timeout=aiohttp.ClientTimeout(total=8),
             ) as resp:
                 if resp.status != 200:
                     return ""

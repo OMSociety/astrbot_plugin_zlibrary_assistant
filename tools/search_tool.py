@@ -19,7 +19,8 @@ from ..templates import SEARCH_CARD_TMPL
 from ..zlib_client import ZlibClient, ZlibError
 
 MAX_COVER_CARDS = 8  # 渲染卡片的上限，防止图片过大
-COVER_DOWNLOAD_CONCURRENCY = 4  # 封面下载并发数（避免触发 Z-Library 风控）
+COVER_DOWNLOAD_CONCURRENCY = 8  # 封面下载并发数（8 本一轮并发跑完）
+CARD_RENDER_TIMEOUT = 25  # 卡片渲染最长等待（秒）；超时降级纯文本，避免吃掉工具整体超时预算
 
 
 async def _attach_covers(client: ZlibClient, books: list[dict]) -> list[dict]:
@@ -60,17 +61,25 @@ def _book_text_lines(books: list[dict]) -> list[str]:
 
 
 async def _render_book_card(books: list[dict], query: str) -> str | None:
-    """渲染书籍卡片图片，返回本地图片路径；失败返回 None（调用方降级）。"""
+    """渲染书籍卡片图片，返回本地图片路径；失败/超时返回 None（调用方降级）。
+
+    用 asyncio.wait_for 限定渲染时长：AstrBot 对工具整体有 60 秒超时
+    （tool_call_timeout），若渲染服务慢/不可达而一直等，工具会被整体掐断
+    报 timeout（连降级的机会都没有）。限定 25 秒后超时即降级纯文本。
+    """
     try:
-        img_path = await html_renderer.render_custom_template(
-            SEARCH_CARD_TMPL,
-            {"books": books, "query": query},
-            return_url=False,
-            options={"full_page": True, "type": "jpeg", "quality": 40},
+        img_path = await asyncio.wait_for(
+            html_renderer.render_custom_template(
+                SEARCH_CARD_TMPL,
+                {"books": books, "query": query},
+                return_url=False,
+                options={"full_page": True, "type": "jpeg", "quality": 40},
+            ),
+            timeout=CARD_RENDER_TIMEOUT,
         )
         return img_path
-    except Exception as e:  # noqa: BLE001 - 渲染失败需降级，不向上抛
-        logger.warning(f"搜索结果卡片渲染失败，降级为纯文本: {e}")
+    except Exception as e:  # noqa: BLE001 - 渲染失败/超时需降级，不向上抛
+        logger.warning(f"搜索结果卡片渲染失败或超时（{CARD_RENDER_TIMEOUT}s），降级为纯文本: {e}")
         return None
 
 
