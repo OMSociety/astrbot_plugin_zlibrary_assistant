@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import os
 import re
 from dataclasses import dataclass
 
 import aiohttp
+from PIL import Image
 
 # 使用 AstrBot 插件 logger（与插件日志格式一致，避免 loguru record 缺字段）
 from astrbot.api import logger
@@ -133,6 +135,44 @@ def _sanitize_filename(filename: str) -> str:
     """
     cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", filename).strip(" .")
     return cleaned or "book"
+
+
+def _guess_image_mime(content: bytes) -> str:
+    """按文件头魔数判断图片真实类型（比响应头 Content-Type 可靠）。
+
+    Z-Library 封面 CDN 常返回 application/octet-stream 或缺省类型，
+    若按响应头猜成 image/jpeg 而实际是 PNG，浏览器解码失败图片不显示。
+    """
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
+def _resize_cover(content: bytes, max_width: int = 168) -> bytes:
+    """缩放封面并转 JPEG，压缩 base64 体积（卡片封面显示宽仅 84px，2x 清晰度 168px 足够）。
+
+    压缩失败返回原图（调用方按魔数判断类型）。
+    """
+    try:
+        img = Image.open(io.BytesIO(content))
+        if img.width > max_width:
+            ratio = max_width / img.width
+            img = img.resize(
+                (max_width, max(1, int(img.height * ratio))), Image.LANCZOS
+            )
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001 - 压缩失败退化为原图
+        return content
 
 
 def _normalize_domain(domain: str) -> str:
@@ -455,7 +495,9 @@ class ZlibClient:
         背景：AstrBot 云端文转图服务在远程服务器渲染模板，访问不了
         Z-Library 封面 CDN 外链（实测封面全部加载失败）；把封面以
         base64 内嵌进 HTML 后，渲染不再依赖外网。
-        失败返回空字符串（调用方降级为占位图）。
+        下载后先缩放压缩（卡片显示宽仅 84px），再按文件头魔数判断
+        真实图片类型，避免 CDN 响应头缺失/错误导致解码失败。
+        失败返回空字符串（调用方降级为占位图），原因记 debug 日志。
         """
         if not url or not url.startswith(("http://", "https://")):
             return ""
@@ -468,16 +510,22 @@ class ZlibClient:
                 timeout=aiohttp.ClientTimeout(total=8),
             ) as resp:
                 if resp.status != 200:
+                    logger.debug(f"封面下载失败: HTTP {resp.status} - {url[:80]}")
                     return ""
                 content = await resp.read()
-                if not content or len(content) > max_bytes:
+                if not content:
+                    logger.debug(f"封面下载为空: {url[:80]}")
                     return ""
-                mime = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
-                if not mime.startswith("image/"):
-                    mime = "image/jpeg"
-                return f"data:{mime};base64,{base64.b64encode(content).decode('ascii')}"
-        except Exception:  # noqa: BLE001 - 封面下载失败不影响搜索
+                if len(content) > max_bytes:
+                    logger.debug(f"封面过大({len(content)}B)，跳过: {url[:80]}")
+                    return ""
+        except Exception as e:  # noqa: BLE001 - 封面下载失败不影响搜索
+            logger.debug(f"封面下载异常: {url[:80]} - {e}")
             return ""
+
+        compressed = _resize_cover(content)
+        mime = _guess_image_mime(compressed)
+        return f"data:{mime};base64,{base64.b64encode(compressed).decode('ascii')}"
 
     async def download_by_id(self, book_id: int) -> tuple[Account, str, bytes]:
         """按 id 下载书籍（id 必须来自之前 search 的结果缓存，缓存已持久化）。
