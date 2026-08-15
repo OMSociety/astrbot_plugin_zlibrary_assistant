@@ -31,3 +31,4 @@
 - 移除 `@register` 装饰器：插件标识统一由 `metadata.yaml` 驱动（消除装饰器与 metadata 的 name/version 不一致）
 - `initialize()` 增加防重入守卫；删除 `_request_json` 死参数 `allow_html`；ruff 规范化导入排序；`.gitignore` 排除 `.ruff_cache/`
 - **搜索结果封面修复**：封面在插件端下载并转 base64 内嵌进卡片 HTML（云端文转图服务访问不了 Z-Library 封面 CDN 外链，此前实测封面全部显示占位）
+- **工具超时保护**：卡片渲染限定 25 秒（`asyncio.wait_for`），渲染服务慢/不可达时自动降级纯文本，不再因吃掉 AstrBot 的 `tool_call_timeout`（默认 60s）导致整个工具报 timeout
