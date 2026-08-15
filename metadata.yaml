@@ -4,3 +4,7 @@ desc: 为 Astrbot 提供 Z-Library 图书搜索与下载能力（账号池、HTM
 version: 1.0.0
 author: OMSociety
 repo: https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant
+tags:
+  - 电子书
+  - Z-Library
+  - 下载
