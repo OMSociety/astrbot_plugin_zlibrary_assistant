@@ -44,9 +44,11 @@ DEFAULT_HEADERS = {
     ),
 }
 
-# 封面 CDN 兜底域名：Z-Library 封面图由独立 CDN 提供（如 covers.zlibcdn2.com），
-# 该域名经常不可达；原 URL 下载失败时依次替换为这些域名重试（实测 z-lib.fm 可达）
-COVER_FALLBACK_HOSTS = ("z-lib.fm",)
+# 封面 CDN 兜底域名：Z-Library 封面图由独立 CDN 提供（如 covers.z-lib.sk），
+# 该域名经常对特定出口 IP/节点风控（HTTP 513/503）；原 URL 下载失败时
+# 依次替换为这些域名重试。当前 E-API 域名（self.domain）会优先尝试——
+# 封面资源与 E-API 常为同一套部署，E-API 域名可用时同路径封面大概率也可用
+COVER_FALLBACK_HOSTS = ("z-lib.fm", "covers.zlibcdn2.com")
 
 # 错误分类（category）：
 #   network_error    网络异常（超时/连接失败/代理错误）
@@ -530,8 +532,9 @@ class ZlibClient:
         """
         if not url or not url.startswith(("http://", "https://")):
             return ""
+        # 候选地址：原 URL → 当前 E-API 域名（同套部署，最可能可用）→ 其他兜底域名
         candidates = [url]
-        for host in COVER_FALLBACK_HOSTS:
+        for host in (self.domain,) + COVER_FALLBACK_HOSTS:
             alt = _replace_host(url, host)
             if alt and alt not in candidates:
                 candidates.append(alt)
@@ -557,7 +560,8 @@ class ZlibClient:
         否则返回 HTTP 513）；没配置账号时不带。
         """
         session = await self._get_session()
-        kwargs: dict = {"proxy": self.proxy, "ssl": False}
+        headers = {"Referer": self._base_url() + "/"}  # 部分 CDN 校验 Referer
+        kwargs: dict = {"proxy": self.proxy, "ssl": False, "headers": headers}
         cover_cookies = self._cover_cookies()
         if cover_cookies:
             kwargs["cookies"] = cover_cookies
