@@ -34,8 +34,11 @@ async def _attach_covers(client: ZlibClient, books: list[dict]) -> list[dict]:
 
     async def fetch(b: dict) -> dict:
         url = b.get("cover", "")
-        if not url or not url.startswith(("http://", "https://")):
+        if not url or url.startswith("data:"):
             return b  # 无封面或已是 data URI 的条目直接跳过
+        if not url.startswith(("http://", "https://")):
+            # 相对路径（如 /covers/xx.jpg）→ 拼成完整 URL
+            url = f"https://{client.domain}/{url.lstrip('/')}"
         async with sem:
             data_uri = await client.fetch_cover_base64(url)
         b["cover"] = data_uri if data_uri else ""
