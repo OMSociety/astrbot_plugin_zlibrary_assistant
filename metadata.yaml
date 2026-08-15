@@ -1,5 +1,5 @@
 name: zlibrary_assistant
-display_name: 电子书助手
+display_name: Zlibrary助手
 desc: 为 Astrbot 提供 Z-Library 图书搜索与下载能力（账号池、HTML 卡片结果、额度管控）
 version: 1.0.0
 author: OMSociety
