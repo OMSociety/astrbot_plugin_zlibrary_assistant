@@ -209,7 +209,7 @@ Z-Library 安卓客户端内部接口（非官方 E-API）的异步封装：
 ### 卡片渲染（templates.py）
 HTML + Jinja2 模板，走 AstrBot 内置文转图（`html_renderer`）：
 - CSS 字体栈，云端渲染自动选择中文字体，不依赖本地字体
-- 封面 `<img>` 引用 Z-Library CDN，加载失败自动露出渐变占位
+- 封面由插件端下载并 **base64 内嵌**（云端渲染器无需访问 Z-Library 外链），下载失败自动露出渐变占位
 - 标题两行截断、作者单行省略，长列表排版稳定
 
 ---

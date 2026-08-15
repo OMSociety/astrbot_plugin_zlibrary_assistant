@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import re
@@ -447,6 +448,36 @@ class ZlibClient:
                 continue
         self._save_book_cache()
         return books
+
+    async def fetch_cover_base64(self, url: str, max_bytes: int = 5 * 1024 * 1024) -> str:
+        """下载封面图并转成 base64 data URI，供 HTML 卡片内嵌。
+
+        背景：AstrBot 云端文转图服务在远程服务器渲染模板，访问不了
+        Z-Library 封面 CDN 外链（实测封面全部加载失败）；把封面以
+        base64 内嵌进 HTML 后，渲染不再依赖外网。
+        失败返回空字符串（调用方降级为占位图）。
+        """
+        if not url or not url.startswith(("http://", "https://")):
+            return ""
+        session = await self._get_session()
+        try:
+            async with session.get(
+                url,
+                proxy=self.proxy,
+                ssl=False,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return ""
+                content = await resp.read()
+                if not content or len(content) > max_bytes:
+                    return ""
+                mime = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                if not mime.startswith("image/"):
+                    mime = "image/jpeg"
+                return f"data:{mime};base64,{base64.b64encode(content).decode('ascii')}"
+        except Exception:  # noqa: BLE001 - 封面下载失败不影响搜索
+            return ""
 
     async def download_by_id(self, book_id: int) -> tuple[Account, str, bytes]:
         """按 id 下载书籍（id 必须来自之前 search 的结果缓存，缓存已持久化）。
