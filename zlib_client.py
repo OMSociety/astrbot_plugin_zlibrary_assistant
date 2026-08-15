@@ -19,7 +19,6 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 from PIL import Image
@@ -43,12 +42,6 @@ DEFAULT_HEADERS = {
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ),
 }
-
-# 封面 CDN 兜底域名：Z-Library 封面图由独立 CDN 提供（如 covers.z-lib.sk），
-# 该域名经常对特定出口 IP/节点风控（HTTP 513/503）；原 URL 下载失败时
-# 依次替换为这些域名重试。当前 E-API 域名（self.domain）会优先尝试——
-# 封面资源与 E-API 常为同一套部署，E-API 域名可用时同路径封面大概率也可用
-COVER_FALLBACK_HOSTS = ("z-lib.fm", "covers.zlibcdn2.com")
 
 # 错误分类（category）：
 #   network_error    网络异常（超时/连接失败/代理错误）
@@ -142,19 +135,6 @@ def _sanitize_filename(filename: str) -> str:
     """
     cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", filename).strip(" .")
     return cleaned or "book"
-
-
-def _replace_host(url: str, new_host: str) -> str | None:
-    """替换 URL 的主机名（封面 CDN 域名失效时切换镜像域名重试）。"""
-    try:
-        p = urlparse(url)
-        if not p.hostname:
-            return None
-        return urlunparse(
-            (p.scheme or "https", new_host, p.path, p.params, p.query, p.fragment)
-        )
-    except Exception:  # noqa: BLE001 - 无法解析的 URL 返回 None
-        return None
 
 
 def _guess_image_mime(content: bytes) -> str:
@@ -520,38 +500,24 @@ class ZlibClient:
         self._save_book_cache()
         return books
 
-    async def fetch_cover_base64(self, url: str, max_bytes: int = 1024 * 1024) -> str:
+    async def fetch_cover_base64(self, url: str, max_bytes: int = 1024 * 1024) -> tuple[str, str]:
         """下载封面图并转成 base64 data URI，供 HTML 卡片内嵌。
 
         背景：AstrBot 云端文转图服务在远程服务器渲染模板，访问不了
         Z-Library 封面 CDN 外链（实测封面全部加载失败）；把封面以
         base64 内嵌进 HTML 后，渲染不再依赖外网。
-        原 URL 下载失败时自动把域名替换为可达镜像（COVER_FALLBACK_HOSTS）重试；
-        下载后缩放压缩，按文件头魔数判断真实图片类型。
-        失败返回空字符串（调用方降级为占位图），原因记 WARNING 日志。
+        请求带账号池第一个账号的 cookies（封面 CDN 需要登录态）。
+        返回 (data URI 或 '', 错误信息)；失败原因由调用方汇总成一条日志，
+        避免每张封面失败都打一条 WARNING 刷屏。
         """
         if not url or not url.startswith(("http://", "https://")):
-            return ""
-        # 候选地址：原 URL → 当前 E-API 域名（同套部署，最可能可用）→ 其他兜底域名
-        candidates = [url]
-        for host in (self.domain,) + COVER_FALLBACK_HOSTS:
-            alt = _replace_host(url, host)
-            if alt and alt not in candidates:
-                candidates.append(alt)
-        content: bytes | None = None
-        last_err = "未知错误"
-        for cand in candidates:
-            content, last_err = await self._download_cover(cand, max_bytes)
-            if content:
-                break
+            return "", "无效 URL"
+        content, err = await self._download_cover(url, max_bytes)
         if not content:
-            logger.warning(
-                f"封面下载失败（已尝试 {len(candidates)} 个地址）: {url[:100]} - {last_err}"
-            )
-            return ""
+            return "", err
         compressed = _resize_cover(content)
         mime = _guess_image_mime(compressed)
-        return f"data:{mime};base64,{base64.b64encode(compressed).decode('ascii')}"
+        return f"data:{mime};base64,{base64.b64encode(compressed).decode('ascii')}", ""
 
     async def _download_cover(self, url: str, max_bytes: int) -> tuple[bytes | None, str]:
         """下载封面图片，返回 (内容, 错误信息)；失败时内容为 None。

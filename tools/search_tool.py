@@ -29,8 +29,10 @@ async def _attach_covers(client: ZlibClient, books: list[dict]) -> list[dict]:
     背景：AstrBot 云端文转图服务访问不了 Z-Library 封面 CDN，直接引用
     外链会全部加载失败；先在本机（走配置代理）下载封面转 base64 内嵌，
     云端渲染器即可正常显示。下载失败的书 cover 置空，模板自动显示占位。
+    失败日志合并为一条（示例原因），避免每张封面一条 WARNING 刷屏。
     """
     sem = asyncio.Semaphore(COVER_DOWNLOAD_CONCURRENCY)
+    errors: list[str] = []
 
     async def fetch(b: dict) -> dict:
         url = b.get("cover", "")
@@ -40,13 +42,23 @@ async def _attach_covers(client: ZlibClient, books: list[dict]) -> list[dict]:
             # 相对路径（如 /covers/xx.jpg）→ 拼成完整 URL
             url = f"https://{client.domain}/{url.lstrip('/')}"
         async with sem:
-            data_uri = await client.fetch_cover_base64(url)
-        b["cover"] = data_uri if data_uri else ""
+            data_uri, err = await client.fetch_cover_base64(url)
+        if data_uri:
+            b["cover"] = data_uri
+        else:
+            b["cover"] = ""
+            errors.append(err)
         return b
 
     books = await asyncio.gather(*(fetch(b) for b in books))
-    total = sum(1 for b in books if str(b.get("cover", "")).startswith("data:"))
-    logger.info(f"封面下载完成：成功 {total}/{len(books)} 张（失败的书显示占位）")
+    failed = len(errors)
+    if failed:
+        logger.warning(
+            f"封面下载失败 {failed}/{len(books)} 张（示例原因：{errors[0]}），显示占位"
+        )
+    else:
+        ok = sum(1 for b in books if str(b.get("cover", "")).startswith("data:"))
+        logger.info(f"封面下载完成：成功 {ok}/{len(books)} 张")
     return books
 
 
