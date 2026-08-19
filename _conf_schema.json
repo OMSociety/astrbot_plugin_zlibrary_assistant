@@ -47,7 +47,7 @@
     "description": "Z-Library E-API 域名",
     "type": "string",
     "default": "z-library.sk",
-    "hint": "域名可能被没收/变动。失效时（提示『当前域名可能已失效』）换一个可用域名，如 z-library.sk、singlelogin.re。验证方法：浏览器访问 https://<域名>/eapi/info，返回 JSON 即有效"
+    "hint": "域名可能被没收/变动。失效时（提示『当前域名可能已失效』）换一个可用域名，如 z-library.sk。验证方法：浏览器访问 https://<域名>/eapi/info，返回 JSON 即有效"
   },
   "proxy": {
     "description": "HTTP 代理（可选）",
