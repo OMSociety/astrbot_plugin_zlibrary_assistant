@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import html
 from typing import Any
-
-from mcp.types import CallToolResult, TextContent
-from pydantic import ConfigDict, Field
-from pydantic.dataclasses import dataclass
 
 from astrbot.api import logger
 from astrbot.core import html_renderer
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
+from mcp.types import CallToolResult, TextContent
+from pydantic import ConfigDict, Field
+from pydantic.dataclasses import dataclass
 
 from ..templates import SEARCH_CARD_TMPL
 from ..zlib_client import ZlibClient, ZlibError
@@ -80,6 +80,33 @@ def _book_text_lines(books: list[dict]) -> list[str]:
     return lines
 
 
+def _build_render_data(books: list[dict], query: str) -> dict:
+    """构建卡片渲染数据：所有进模板的字段先经 html.escape 转义。
+
+    书籍元信息（标题/作者等）是 Z-Library 返回的第三方内容，query 是用户输入，
+    而云端 t2i 渲染器对 Jinja2 插值是否自动转义不受控，存在 HTML 注入风险
+    （与 reverse_searcher 1.0.3 修复同源），因此在数据侧逐字段转义兜底。
+    cover 为 base64 data URI（字符集不含 & < >），转义后原样通过。
+    """
+
+    def esc(v: Any) -> str:
+        return html.escape(str(v if v is not None else ""))
+
+    safe_books = [
+        {
+            "title": esc(b.get("title")),
+            "author": esc(b.get("author")),
+            "extension": esc(b.get("extension")),
+            "language": esc(b.get("language")),
+            "year": esc(b.get("year")),
+            "filesizeString": esc(b.get("filesizeString")),
+            "cover": esc(b.get("cover")),
+        }
+        for b in books
+    ]
+    return {"books": safe_books, "query": esc(query)}
+
+
 async def _render_book_card(books: list[dict], query: str) -> str | None:
     """渲染书籍卡片图片，返回本地图片路径；失败/超时返回 None（调用方降级）。
 
@@ -91,7 +118,7 @@ async def _render_book_card(books: list[dict], query: str) -> str | None:
         img_path = await asyncio.wait_for(
             html_renderer.render_custom_template(
                 SEARCH_CARD_TMPL,
-                {"books": books, "query": query},
+                _build_render_data(books, query),
                 return_url=False,
                 options={"full_page": True, "type": "jpeg", "quality": 40},
             ),

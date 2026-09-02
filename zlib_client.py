@@ -21,11 +21,11 @@ import re
 from dataclasses import dataclass
 
 import aiohttp
-from PIL import Image
 
 # 使用 AstrBot 插件 logger（与插件日志格式一致，避免 loguru record 缺字段）
 from astrbot.api import logger
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+from PIL import Image
 
 # 各端点（域名由配置提供，前缀 https://{domain}）
 EP_LOGIN = "/eapi/user/login"
