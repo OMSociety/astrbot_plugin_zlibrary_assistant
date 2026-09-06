@@ -36,9 +36,9 @@ EP_FILE = "/eapi/book/{book_id}/{hash_id}/file"
 # 书籍缓存上限（按写入顺序淘汰最旧条目），防止长期运行无限膨胀
 _MAX_BOOK_CACHE = 500
 
-# 默认请求头（模拟浏览器，降低被风控概率）
+# 默认请求头（模拟浏览器，降低被风控概率）。
+# Content-Type 不放这里：POST 才有意义，GET 带表单类型头不严谨
 DEFAULT_HEADERS = {
-    "Content-Type": "application/x-www-form-urlencoded",
     "Accept": "application/json, text/plain, */*",
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -321,6 +321,12 @@ class ZlibClient:
             kwargs["cookies"] = self._cookies(account)
         if params:
             kwargs["params"] = params
+        headers = {}
+        if data is not None:
+            # 表单 Content-Type 只在带请求体的 POST 上有意义
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        if headers:
+            kwargs["headers"] = headers
 
         try:
             async with session.request(method, url, data=data, **kwargs) as resp:
@@ -464,9 +470,14 @@ class ZlibClient:
                 for a in self.pool
                 if a.logged_in
             ]
+            # 额度上限来自 API（downloads_limit），免费号 10 次、Premium 更多，
+            # 文案不硬编码次数
+            limit = max(
+                (a.downloads_limit for a in self.pool if a.logged_in), default=10
+            )
             raise ZlibError(
                 "quota_exhausted",
-                "账号池今日下载额度已全部用完（每个账号每日 10 次）",
+                f"账号池今日下载额度已全部用完（每个账号每日 {limit} 次）",
                 "; ".join(used),
             )
         # 额度剩余最多者优先
@@ -559,11 +570,12 @@ class ZlibClient:
             ) as resp:
                 if resp.status != 200:
                     return None, f"HTTP {resp.status}"
-                content = await resp.read()
+                # 边读边限：只多读 1 字节用于超限判定，避免异常大图整份进内存
+                content = await resp.content.read(max_bytes + 1)
                 if not content:
                     return None, "空内容"
                 if len(content) > max_bytes:
-                    return None, f"文件过大({len(content)}B)"
+                    return None, f"文件过大(>{max_bytes}B)"
                 return content, ""
         except Exception as e:  # noqa: BLE001 - 下载失败由调用方统一处理
             return None, f"{type(e).__name__}: {e}"
