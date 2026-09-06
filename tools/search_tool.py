@@ -120,7 +120,6 @@ async def _render_book_card(books: list[dict], query: str) -> str | None:
                 SEARCH_CARD_TMPL,
                 _build_render_data(books, query),
                 return_url=False,
-                options={"full_page": True, "type": "jpeg", "quality": 40},
             ),
             timeout=CARD_RENDER_TIMEOUT,
         )
@@ -198,18 +197,17 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
         if not books:
             return f"未在 Z-Library 找到与「{query}」相关的图书，可以换个关键词试试。"
 
-        # 供 LLM 阅读的文本（含 id）
-        text_lines = _book_text_lines(books[:MAX_COVER_CARDS])
+        # 渲染 HTML 卡片图片（封面/标题/作者/格式），保存到本地文件
+        # 注意：不通过 ImageContent 返回（纯文本模型如 deepseek-chat 会因 image_url 报 400），
+        # 而是给出图片路径，由 LLM 用 send_message_to_user(type=image) 发送给用户。
+        cards = books[:MAX_COVER_CARDS]
+        # 供 LLM 阅读的文本（含 id），与卡片同源
+        text_lines = _book_text_lines(cards)
         text = (
             f"搜索「{query}」命中 {len(books)} 本（以下展示前 {len(text_lines)} 本）：\n"
             + "\n".join(text_lines)
             + "\n提示：搜索不消耗下载额度；用户要求下载时，请用 zlib_download_book 并传入对应 id。"
         )
-
-        # 渲染 HTML 卡片图片（封面/标题/作者/格式），保存到本地文件
-        # 注意：不通过 ImageContent 返回（纯文本模型如 deepseek-chat 会因 image_url 报 400），
-        # 而是给出图片路径，由 LLM 用 send_message_to_user(type=image) 发送给用户。
-        cards = books[:MAX_COVER_CARDS]
         await _attach_covers(
             self.client, cards
         )  # 封面转 base64 内嵌，修复云端渲染器无法加载外链

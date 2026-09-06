@@ -90,6 +90,8 @@ class ZLibraryAssistantPlugin(Star):
             self._login_task.cancel()
             try:
                 await self._login_task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001 - 取消任务是预期行为
+            except asyncio.CancelledError:  # 取消任务是预期行为
                 logger.debug("后台登录任务已取消")
+            except Exception as e:  # noqa: BLE001 - 关闭阶段异常不再向上抛
+                logger.debug(f"后台登录任务异常结束: {e}")
         await self.client.close()
