@@ -8,6 +8,8 @@
 - 所有网络请求异步（aiohttp），符合 AstrBot 开发原则（禁止 requests）
 - 账号池：每个账号独立记录每日下载额度（downloads_today / downloads_limit）
 - 错误分类：统一抛 ZlibError，带 category 便于上层翻译成友好提示
+- SSRF 纵深防护：API 返回的封面/下载 URL 请求前经 zlib_security 校验
+  （IP 黑名单 + 重定向不自动跟随、手动逐跳校验，见 _guarded_get）
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from urllib.parse import urljoin
 
 import aiohttp
 
@@ -26,6 +29,8 @@ import aiohttp
 from astrbot.api import logger
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from PIL import Image
+
+from .zlib_security import is_safe_public_url
 
 # 各端点（域名由配置提供，前缀 https://{domain}）
 EP_LOGIN = "/eapi/user/login"
@@ -35,6 +40,10 @@ EP_FILE = "/eapi/book/{book_id}/{hash_id}/file"
 
 # 书籍缓存上限（按写入顺序淘汰最旧条目），防止长期运行无限膨胀
 _MAX_BOOK_CACHE = 500
+
+# 重定向不自动跟随（防公网 302 跳内网的 SSRF 放大），手动逐跳校验
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_MAX_REDIRECT_HOPS = 3
 
 # 默认请求头（模拟浏览器，降低被风控概率）。
 # Content-Type 不放这里：POST 才有意义，GET 带表单类型头不严谨
@@ -532,9 +541,11 @@ class ZlibClient:
     ) -> tuple[str, str]:
         """下载封面图并转成 base64 data URI，供 HTML 卡片内嵌。
 
-        背景：AstrBot 云端文转图服务在远程服务器渲染模板，访问不了
+        背景一（内嵌）：AstrBot 云端文转图服务在远程服务器渲染模板，访问不了
         Z-Library 封面 CDN 外链（实测封面全部加载失败）；把封面以
         base64 内嵌进 HTML 后，渲染不再依赖外网。
+        背景二（SSRF）：封面 URL 来自 API 响应（第三方内容），请求经
+        _guarded_get 做 IP 黑名单 + 重定向逐跳校验。
         请求带账号池第一个账号的 cookies（封面 CDN 需要登录态）。
         返回 (data URI 或 '', 错误信息)；失败原因由调用方汇总成一条日志，
         避免每张封面失败都打一条 WARNING 刷屏。
@@ -548,6 +559,59 @@ class ZlibClient:
         mime = _guess_image_mime(compressed)
         return f"data:{mime};base64,{base64.b64encode(compressed).decode('ascii')}", ""
 
+    async def _guarded_get(
+        self,
+        url: str,
+        *,
+        headers: dict | None = None,
+        cookies: dict | None = None,
+        timeout_total: float,
+    ) -> tuple[aiohttp.ClientResponse | None, str]:
+        """带 SSRF 校验的 GET：不自动跟随重定向，逐跳校验（最多 3 跳）。
+
+        每一跳都重新校验目标为公网 http/https 地址（is_safe_public_url），
+        防止 API 返回的 URL 或重定向把请求带去内网。
+        返回 (响应, 错误信息)；成功时响应由调用方负责关闭。
+        """
+        session = await self._get_session()
+        current = url
+        for hop in range(_MAX_REDIRECT_HOPS + 1):
+            # getaddrinfo 是阻塞调用，放线程池避免卡事件循环
+            ok, reason = await asyncio.to_thread(is_safe_public_url, current)
+            if not ok:
+                return None, f"URL 未通过安全校验（{reason}）: {current[:200]}"
+            try:
+                resp = await session.get(
+                    current,
+                    allow_redirects=False,
+                    proxy=self.proxy,
+                    # ssl=False 是该站既有取舍（Z-Library 证书链问题）；
+                    # 明文/降级不改变校验目标主机，风险由逐跳 IP 黑名单兜底
+                    ssl=False,
+                    headers=headers,
+                    cookies=cookies,
+                    timeout=aiohttp.ClientTimeout(total=timeout_total),
+                )
+            except (
+                aiohttp.ClientConnectorError,
+                aiohttp.ServerTimeoutError,
+                asyncio.TimeoutError,
+            ) as e:
+                return None, f"网络异常: {type(e).__name__}: {e}"
+            except aiohttp.ClientError as e:
+                return None, f"{type(e).__name__}: {e}"
+            if resp.status not in _REDIRECT_STATUSES:
+                return resp, ""
+            if hop == _MAX_REDIRECT_HOPS:
+                await resp.release()
+                return None, f"重定向超过 {_MAX_REDIRECT_HOPS} 跳"
+            location = resp.headers.get("Location")
+            await resp.release()
+            if not location:
+                return None, "重定向缺少 Location"
+            current = urljoin(current, location)
+        return None, "重定向异常"  # pragma: no cover - 循环内所有路径均已返回
+
     async def _download_cover(
         self, url: str, max_bytes: int
     ) -> tuple[bytes | None, str]:
@@ -556,18 +620,15 @@ class ZlibClient:
         请求统一带账号池第一个账号的 cookies（封面 CDN 需要登录态，
         否则返回 HTTP 513）；没配置账号时不带。
         """
-        session = await self._get_session()
         headers = {"Referer": self._base_url() + "/"}  # 部分 CDN 校验 Referer
-        kwargs: dict = {"proxy": self.proxy, "ssl": False, "headers": headers}
         cover_cookies = self._cover_cookies()
-        if cover_cookies:
-            kwargs["cookies"] = cover_cookies
+        resp, err = await self._guarded_get(
+            url, headers=headers, cookies=cover_cookies, timeout_total=8
+        )
+        if resp is None:
+            return None, err
         try:
-            async with session.get(
-                url,
-                timeout=aiohttp.ClientTimeout(total=8),
-                **kwargs,
-            ) as resp:
+            async with resp:
                 if resp.status != 200:
                     return None, f"HTTP {resp.status}"
                 # 边读边限：只多读 1 字节用于超限判定，避免异常大图整份进内存
@@ -635,9 +696,14 @@ class ZlibClient:
         account = self.pick_download_account()
         dl, filename, _ext = await self.get_download_link(account, book)
 
-        session = await self._get_session()
+        # 下载直链由 API 返回（第三方内容），同样经 _guarded_get 做 SSRF 校验
+        resp, err = await self._guarded_get(dl, timeout_total=self.timeout)
+        if resp is None:
+            raise ZlibError(
+                "network_error", "下载失败（网络异常或链接未通过安全校验）", err
+            )
         try:
-            async with session.get(dl, proxy=self.proxy, ssl=False) as resp:
+            async with resp:
                 if resp.status != 200:
                     raise ZlibError(
                         "api_error",
