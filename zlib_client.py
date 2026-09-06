@@ -33,6 +33,9 @@ EP_PROFILE = "/eapi/user/profile"
 EP_SEARCH = "/eapi/book/search"
 EP_FILE = "/eapi/book/{book_id}/{hash_id}/file"
 
+# 书籍缓存上限（按写入顺序淘汰最旧条目），防止长期运行无限膨胀
+_MAX_BOOK_CACHE = 500
+
 # 默认请求头（模拟浏览器，降低被风控概率）
 DEFAULT_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
@@ -88,8 +91,13 @@ class Account:
 
 
 def _is_rate_limited(text: str) -> bool:
-    """识别 IP 限流响应。"""
-    return "Too many requests" in text or "#ipd3" in text or "Err #" in text
+    """识别 IP 限流响应。
+
+    只匹配明确的限流文案，不能加宽泛的 "Err #"——E-API 的业务错误
+    （文件不存在、参数错误等）也以 "Err #N" 开头，误判会让用户看到
+    "IP 被限流"的误导提示。
+    """
+    return "Too many requests" in text or "#ipd3" in text
 
 
 def _is_cf_challenge(text: str) -> bool:
@@ -491,14 +499,22 @@ class ZlibClient:
                 json.dumps(resp, ensure_ascii=False)[:200],
             )
         books = resp.get("books") or []
-        # 缓存书籍信息（供 download_by_id 使用），并持久化到磁盘
+        # 缓存书籍信息（供 download_by_id 使用），并持久化到磁盘。
+        # 必须存浅拷贝：调用方会对返回的 book dict 就地写入 base64 封面，
+        # 若缓存引用同一对象，巨型 base64 会被序列化进磁盘缓存文件。
         for b in books:
             try:
-                self.book_cache[int(b["id"])] = b
+                self.book_cache[int(b["id"])] = dict(b)
             except (KeyError, TypeError, ValueError):
                 continue
+        self._trim_book_cache()
         self._save_book_cache()
         return books
+
+    def _trim_book_cache(self):
+        """限制缓存条目数：dict 保持插入序，超出上限时淘汰最早写入的条目。"""
+        while len(self.book_cache) > _MAX_BOOK_CACHE:
+            self.book_cache.pop(next(iter(self.book_cache)))
 
     async def fetch_cover_base64(
         self, url: str, max_bytes: int = 1024 * 1024
