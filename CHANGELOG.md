@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.0.3] - 2026-09-07
+
+### 🐛 修复
+
+- 下载额度用尽的提示不再硬编码"每日 10 次"，按账号实际额度（API `downloads_limit`）显示。
+- 移除账号池配置的 dict 兼容分支（经提交历史核实从未存在过该结构，配置始终为 template_list）。
+
+### ⚙️ 变更
+
+- 封面下载改为边读边限长，异常大图不再整份读入内存。
+- 表单 Content-Type 请求头仅在带请求体的 POST 上发送（GET 不再携带）。
+
 ## [1.0.2] - 2026-09-06
 
 ### 🐛 修复

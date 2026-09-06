@@ -37,14 +37,6 @@ def _parse_accounts(config: AstrBotConfig) -> list[dict]:
                 }
             )
             accounts.append(item)
-    elif isinstance(raw, dict):
-        # 兼容旧结构（键=备注名，值=账号配置）
-        for name, acc in raw.items():
-            if not isinstance(acc, dict):
-                continue
-            item = {"name": str(name)}
-            item.update({k: v for k, v in acc.items() if v is not None})
-            accounts.append(item)
     return accounts
 
 
