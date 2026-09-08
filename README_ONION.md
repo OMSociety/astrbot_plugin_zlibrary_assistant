@@ -18,11 +18,9 @@ services:
   tor:
     build: ./data/plugins/astrbot_plugin_zlibrary_assistant/docker/tor
     restart: unless-stopped
-    environment:
-      # 国内服务器：让 Tor 自身的外连经过 Mihomo mixed-port。
-      - TOR_UPSTREAM_PROXY=http://mihomo:7890
-    depends_on:
-      - mihomo
+    # 如 Tor 需经过现有代理连接公网，再按实际类型启用：
+    # environment:
+    #   - TOR_UPSTREAM_PROXY=http://proxy-host:port
 ```
 
 3. 确保 AstrBot 和 `tor` 在同一个 Compose 网络，重建并启动：
@@ -43,12 +41,10 @@ docker compose up -d --build tor astrbot
 }
 ```
 
-注意：即使 Mihomo 的 7890 是 mixed-port，也不要把插件的 `proxy` 改成
-`http://mihomo:7890` 或 `socks5://mihomo:7890`。Mihomo 不是 onion 路由器；
-插件仍连接 `socks5://tor:9050`，由 Tor 通过
-`TOR_UPSTREAM_PROXY=http://mihomo:7890` 使用 Mihomo 作为启动和中继连接的
-HTTP CONNECT 上游代理。若 7890 确认是 mixed-port，也可以填
-`TOR_UPSTREAM_PROXY=socks5://mihomo:7890`。
+普通 HTTP/SOCKS 代理不是 onion 路由器，不能代替 Tor。插件始终连接
+`socks5://tor:9050`；如 Tor 本身需要上游代理，再依现有服务的实际协议配置
+`TOR_UPSTREAM_PROXY=http://proxy-host:port` 或
+`TOR_UPSTREAM_PROXY=socks5://proxy-host:port`。上游服务的名称、地址和端口均按实际部署填写。
 
 账号配置与原插件相同。推荐 `remix_userid` + `remix_userkey`，避免频繁调用登录端点。
 

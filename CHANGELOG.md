@@ -10,7 +10,7 @@
 ### ✨ 新增
 
 - 可选通过 Tor SOCKS 访问 v3 onion E-API，原有明网域名和 HTTP 代理配置保持兼容。
-- 提供可选 Tor Docker sidecar，支持使用 Mihomo HTTP/SOCKS 作为 Tor 上游代理。
+- 提供可选 Tor Docker sidecar，支持使用现有 HTTP/SOCKS 服务作为 Tor 上游代理。
 - 新增可配置的单文件下载体积上限。
 
 ### 🔒 安全

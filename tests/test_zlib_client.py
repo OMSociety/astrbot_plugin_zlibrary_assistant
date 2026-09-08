@@ -14,6 +14,7 @@ from astrbot_plugin_zlibrary_assistant.zlib_client import (
     _is_cf_challenge,
     _is_rate_limited,
     _normalize_base_url,
+    _normalize_socks_proxy_url,
 )
 
 
@@ -35,6 +36,17 @@ class TestBaseUrlAndProxy:
         host = "a" * 56 + ".onion"
         with pytest.raises(ValueError, match="SOCKS"):
             ZlibClient(accounts=[], domain=host, proxy="http://127.0.0.1:7890")
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("SOCKS5H://tor:9050", "socks5://tor:9050"),
+            ("Socks5://tor:9050", "socks5://tor:9050"),
+            ("SOCKS4A://tor:9050", "socks4://tor:9050"),
+        ],
+    )
+    def test_socks_scheme_normalization(self, raw, expected):
+        assert _normalize_socks_proxy_url(raw) == expected
 
 
 class _CtxResp:

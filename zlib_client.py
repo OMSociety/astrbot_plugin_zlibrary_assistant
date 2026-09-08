@@ -208,6 +208,17 @@ def _normalize_base_url(value: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def _normalize_socks_proxy_url(value: str) -> str:
+    """规范化 SOCKS URL：方案名不区分大小写，h/a 语义由 rdns=True 承担。"""
+    parsed = urlparse(value)
+    scheme = parsed.scheme.lower()
+    if scheme == "socks5h":
+        scheme = "socks5"
+    elif scheme == "socks4a":
+        scheme = "socks4"
+    return parsed._replace(scheme=scheme).geturl()
+
+
 class ZlibClient:
     """Z-Library E-API 异步客户端。"""
 
@@ -295,7 +306,7 @@ class ZlibClient:
                     timeout = aiohttp.ClientTimeout(total=self.timeout)
                     connector = None
                     if self._socks_proxy:
-                        proxy_url = self.proxy.replace("socks5h://", "socks5://", 1)
+                        proxy_url = _normalize_socks_proxy_url(self.proxy)
                         connector = ProxyConnector.from_url(proxy_url, rdns=True)
                     self._session = aiohttp.ClientSession(
                         timeout=timeout, headers=DEFAULT_HEADERS, connector=connector
