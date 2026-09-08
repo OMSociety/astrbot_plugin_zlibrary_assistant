@@ -21,9 +21,10 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import aiohttp
+from aiohttp_socks import ProxyConnector
 
 # 使用 AstrBot 插件 logger（与插件日志格式一致，避免 loguru record 缺字段）
 from astrbot.api import logger
@@ -32,7 +33,7 @@ from PIL import Image
 
 from .zlib_security import is_safe_public_url
 
-# 各端点（域名由配置提供，前缀 https://{domain}）
+# 各端点（基础 URL 由配置提供；onion 通常使用 http://）
 EP_LOGIN = "/eapi/user/login"
 EP_PROFILE = "/eapi/user/profile"
 EP_SEARCH = "/eapi/book/search"
@@ -192,18 +193,30 @@ def _resize_cover(content: bytes, max_width: int = 168) -> bytes:
         return content
 
 
-def _normalize_domain(domain: str) -> str:
-    """规范化域名配置：去掉 http(s):// 协议前缀与多余斜杠。
+def _normalize_base_url(value: str) -> str:
+    """规范化 E-API 地址；onion 默认 HTTP，普通域名默认 HTTPS。"""
+    raw = (value or "").strip().rstrip("/")
+    if not raw:
+        raise ValueError("Z-Library E-API 地址不能为空")
+    if "://" not in raw:
+        raw = ("http://" if raw.lower().endswith(".onion") else "https://") + raw
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("E-API 地址必须是 http:// 或 https:// URL")
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise ValueError("E-API 地址只能包含协议和主机名，不能带路径、查询或片段")
+    return f"{parsed.scheme}://{parsed.netloc}"
 
-    用户可能从浏览器地址栏复制带协议的域名（如 https://z-library.sk/），
-    若不处理会拼出 https://https://z-library.sk 的无效 URL。
-    """
-    d = domain.strip()
-    for prefix in ("https://", "http://"):
-        if d.lower().startswith(prefix):
-            d = d[len(prefix) :]
-            break
-    return d.strip("/")
+
+def _normalize_socks_proxy_url(value: str) -> str:
+    """规范化 SOCKS URL：方案名不区分大小写，h/a 语义由 rdns=True 承担。"""
+    parsed = urlparse(value)
+    scheme = parsed.scheme.lower()
+    if scheme == "socks5h":
+        scheme = "socks5"
+    elif scheme == "socks4a":
+        scheme = "socks4"
+    return parsed._replace(scheme=scheme).geturl()
 
 
 class ZlibClient:
@@ -215,10 +228,21 @@ class ZlibClient:
         domain: str = "z-library.sk",
         proxy: str = "",
         timeout: float = 30.0,
+        max_download_mb: int = 80,
     ):
-        self.domain = _normalize_domain(domain)
+        self.base_url = _normalize_base_url(domain)
+        self.domain = urlparse(self.base_url).hostname or ""
+        self.is_onion = self.domain.lower().endswith(".onion")
         self.proxy = proxy or None
+        self._socks_proxy = bool(
+            self.proxy
+            and urlparse(self.proxy).scheme.lower()
+            in {"socks4", "socks4a", "socks5", "socks5h"}
+        )
+        if self.is_onion and not self._socks_proxy:
+            raise ValueError(".onion 地址必须配置 SOCKS 代理，例如 socks5://tor:9050")
         self.timeout = timeout
+        self.max_download_bytes = max(1, min(int(max_download_mb), 512)) * 1024 * 1024
         self.pool: list[Account] = []
         for acc in accounts:
             if not isinstance(acc, dict):
@@ -280,9 +304,12 @@ class ZlibClient:
             async with self._session_lock:
                 if self._session is None or self._session.closed:
                     timeout = aiohttp.ClientTimeout(total=self.timeout)
+                    connector = None
+                    if self._socks_proxy:
+                        proxy_url = _normalize_socks_proxy_url(self.proxy)
+                        connector = ProxyConnector.from_url(proxy_url, rdns=True)
                     self._session = aiohttp.ClientSession(
-                        timeout=timeout,
-                        headers=DEFAULT_HEADERS,
+                        timeout=timeout, headers=DEFAULT_HEADERS, connector=connector
                     )
         return self._session
 
@@ -293,7 +320,11 @@ class ZlibClient:
     # ---------- 基础请求 ----------
 
     def _base_url(self) -> str:
-        return f"https://{self.domain}"
+        return self.base_url
+
+    def _proxy_kwargs(self) -> dict:
+        """SOCKS 由 session connector 接管；HTTP(S) 代理按请求传入。"""
+        return {} if self._socks_proxy or not self.proxy else {"proxy": self.proxy}
 
     def _cookies(self, account: Account) -> dict:
         cookies = {"siteLanguageV2": "en"}
@@ -325,7 +356,7 @@ class ZlibClient:
         """发请求并解析 JSON；对常见异常做分类。"""
         session = await self._get_session()
         url = self._base_url() + path
-        kwargs: dict = {"proxy": self.proxy, "ssl": False}
+        kwargs: dict = {"ssl": False, **self._proxy_kwargs()}
         if account is not None:
             kwargs["cookies"] = self._cookies(account)
         if params:
@@ -577,14 +608,16 @@ class ZlibClient:
         current = url
         for hop in range(_MAX_REDIRECT_HOPS + 1):
             # getaddrinfo 是阻塞调用，放线程池避免卡事件循环
-            ok, reason = await asyncio.to_thread(is_safe_public_url, current)
+            ok, reason = await asyncio.to_thread(
+                is_safe_public_url, current, allow_onion=self._socks_proxy
+            )
             if not ok:
                 return None, f"URL 未通过安全校验（{reason}）: {current[:200]}"
             try:
                 resp = await session.get(
                     current,
                     allow_redirects=False,
-                    proxy=self.proxy,
+                    **self._proxy_kwargs(),
                     # ssl=False 是该站既有取舍（Z-Library 证书链问题）；
                     # 明文/降级不改变校验目标主机，风险由逐跳 IP 黑名单兜底
                     ssl=False,
@@ -710,7 +743,7 @@ class ZlibClient:
                         f"下载失败（HTTP {resp.status}）",
                         dl[:200],
                     )
-                content = await resp.read()
+                content = await resp.content.read(self.max_download_bytes + 1)
         except (
             aiohttp.ClientConnectorError,
             aiohttp.ServerTimeoutError,
@@ -722,6 +755,12 @@ class ZlibClient:
 
         if not content:
             raise ZlibError("api_error", "下载到的文件为空", dl[:200])
+        if len(content) > self.max_download_bytes:
+            raise ZlibError(
+                "api_error",
+                f"文件超过插件允许的 {self.max_download_bytes // 1024 // 1024} MiB 上限",
+                dl[:200],
+            )
         # 扣减额度
         account.downloads_today += 1
         logger.info(

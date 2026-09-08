@@ -44,16 +44,22 @@
     }
   },
   "domain": {
-    "description": "Z-Library E-API 域名",
+    "description": "Z-Library E-API 域名或完整地址",
     "type": "string",
     "default": "z-library.sk",
-    "hint": "域名可能被没收/变动。失效时（提示『当前域名可能已失效』）换一个可用域名，如 z-library.sk。验证方法：浏览器访问 https://<域名>/eapi/info，返回 JSON 即有效"
+    "hint": "可填普通域名、https:// 完整地址，或 http://...onion；不要带 /eapi 路径。onion 模式需同时配置 Tor SOCKS 代理"
   },
   "proxy": {
-    "description": "HTTP 代理（可选）",
+    "description": "HTTP 或 SOCKS 代理（可选）",
     "type": "string",
     "default": "",
-    "hint": "服务器在国内访问 Z-Library 必须填写，格式 http://IP:端口，如 http://127.0.0.1:7897；代理需要账号密码时填 http://用户名:密码@IP:端口（如 http://user:pass@proxy:7080）。境外服务器可留空"
+    "hint": "普通域名可填 http://IP:端口；onion 必须填 Tor SOCKS，Docker Compose 通常为 socks5://tor:9050。普通 HTTP/SOCKS 代理不能直接代替 Tor"
+  },
+  "max_download_mb": {
+    "description": "单个下载文件体积上限（MiB）",
+    "type": "int",
+    "default": 80,
+    "hint": "防止异常响应耗尽 AstrBot 内存；有效范围 1-512 MiB"
   },
   "search_limit": {
     "description": "搜索默认返回条数",
