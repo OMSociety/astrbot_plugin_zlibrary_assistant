@@ -5,6 +5,23 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.0] - 2026-09-09
+
+### ✨ 新增
+
+- 可选通过 Tor SOCKS 访问 v3 onion E-API，原有明网域名和 HTTP 代理配置保持兼容。
+- 提供可选 Tor Docker sidecar，支持使用 Mihomo HTTP/SOCKS 作为 Tor 上游代理。
+- 新增可配置的单文件下载体积上限。
+
+### 🔒 安全
+
+- onion 地址仅允许 v3 格式且必须经 SOCKS 访问；重定向仍逐跳执行 SSRF 校验。
+- 下载改为边读边限长，避免异常响应耗尽 AstrBot 内存。
+
+### ⚙️ 变更
+
+- 账号池后台登录增加有限次重试，适配 Tor 容器冷启动。
+
 ## [1.0.4] - 2026-09-07
 
 ### 🔒 安全
