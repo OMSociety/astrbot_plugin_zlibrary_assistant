@@ -46,8 +46,11 @@ class ZLibraryAssistantPlugin(Star):
         self.config = config
         self.client = ZlibClient(
             accounts=_parse_accounts(config),
-            domain=config.get("domain", "z-library.sk"),
-            proxy=config.get("proxy", ""),
+            domain=config.get("base_url")
+            or config.get("domain")
+            or "z-library.sk",
+            proxy=config.get("tor_proxy") or config.get("proxy", ""),
+            max_download_mb=int(config.get("max_download_mb", 80) or 80),
         )
         self._login_task: asyncio.Task | None = None
         # 注册 LLM 工具（>= v4.5.1 的标准方式）
@@ -70,11 +73,24 @@ class ZLibraryAssistantPlugin(Star):
         self._login_task = asyncio.create_task(self._background_login())
 
     async def _background_login(self):
-        try:
-            await self.client.login_all()
-            logger.info("ZLibrary 账号池登录完成")
-        except Exception as e:  # noqa: BLE001 - 后台登录失败不应阻塞插件启动
-            logger.warning(f"ZLibrary 账号池后台登录失败: {e}")
+        # Tor 容器在冷启动时通常比 AstrBot 更晚完成 bootstrap。
+        # 有限次重试可避免宿主机重启后插件永久停在未登录状态。
+        delays = (0, 10, 20, 30, 45, 60)
+        for attempt, delay in enumerate(delays, start=1):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                await self.client.login_all()
+                logger.info("ZLibrary 账号池登录完成")
+                return
+            except Exception as e:  # noqa: BLE001 - 后台登录失败不应阻塞插件启动
+                if attempt == len(delays):
+                    logger.warning(f"ZLibrary 账号池后台登录失败: {e}")
+                    return
+                logger.info(
+                    "ZLibrary 账号池尚未就绪，"
+                    f"{delays[attempt]} 秒后进行第 {attempt + 1} 次尝试: {e}"
+                )
 
     async def terminate(self):
         """插件卸载/重载时：取消未完成的后台登录，关闭网络会话。"""

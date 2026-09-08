@@ -7,13 +7,13 @@ import asyncio
 
 import aiohttp
 import pytest
-
 from astrbot_plugin_zlibrary_assistant.zlib_client import (
     Account,
     ZlibClient,
     ZlibError,
     _is_cf_challenge,
     _is_rate_limited,
+    _normalize_base_url,
 )
 
 
@@ -21,6 +21,20 @@ def _make_client() -> ZlibClient:
     client = ZlibClient(accounts=[], domain="z-library.sk")
     client.book_cache.clear()
     return client
+
+
+class TestBaseUrlAndProxy:
+    def test_onion_defaults_to_http(self):
+        host = "a" * 56 + ".onion"
+        assert _normalize_base_url(host) == f"http://{host}"
+
+    def test_clearnet_defaults_to_https(self):
+        assert _normalize_base_url("z-library.sk/") == "https://z-library.sk"
+
+    def test_onion_requires_socks(self):
+        host = "a" * 56 + ".onion"
+        with pytest.raises(ValueError, match="SOCKS"):
+            ZlibClient(accounts=[], domain=host, proxy="http://127.0.0.1:7890")
 
 
 class _CtxResp:

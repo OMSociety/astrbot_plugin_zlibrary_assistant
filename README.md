@@ -89,10 +89,10 @@ IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常 全部分�
 
 保存后重启 AstrBot，即可在对话中直接搜书、下载。
 
-> 💡 国内服务器需在 `proxy` 填代理（如 `http://127.0.0.1:7897`），境外服务器可留空。
+> 💡 国内服务器需在 `proxy` 填代理（如 `http://127.0.0.1:7897`），境外服务器可留空。如需使用稳定的 onion 入口，请参阅 [Tor/onion 部署指南](README_ONION.md)。
 
 ### 依赖安装
-插件仅依赖 `aiohttp` + `aiofiles`（异步 HTTP/文件库），AstrBot 安装插件时自动处理，无需额外安装。
+插件依赖 `aiohttp` + `aiofiles` + `aiohttp-socks`，AstrBot 安装插件时自动处理，无需额外安装。
 
 ---
 
@@ -113,8 +113,9 @@ IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常 全部分�
 
 | 配置项 | 类型 | 默认 | 说明 |
 |--------|------|------|------|
-| `domain` | string | `z-library.sk` | Z-Library E-API 域名。域名可能被没收/变动，失效时在此更换。**无需带 `https://` 前缀**，插件会自动处理（常见问题 Q3 有验证方法） |
-| `proxy` | string | `""` | HTTP 代理（可选）。服务器在国内访问 Z-Library 时需要，如 `http://127.0.0.1:7897`；代理需账号密码时用 `http://用户名:密码@IP:端口` |
+| `domain` | string | `z-library.sk` | Z-Library E-API 域名或完整基础 URL。普通域名默认使用 HTTPS；也可填 `http://...onion` |
+| `proxy` | string | `""` | HTTP 或 SOCKS 代理（可选）。onion 地址必须使用 Tor SOCKS，如 `socks5://tor:9050` |
+| `max_download_mb` | int | `80` | 单个下载文件的最大体积（MiB，范围 1-512） |
 
 ### 搜索设置
 
@@ -139,6 +140,7 @@ IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常 全部分�
   ],
   "domain": "z-library.sk",
   "proxy": "",
+  "max_download_mb": 80,
   "search_limit": 5
 }
 ```
@@ -281,7 +283,7 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 
 ### Q7：需要配置哪些依赖？
 
-插件仅依赖 `aiohttp` + `aiofiles`（异步 HTTP/文件库），AstrBot 安装插件时自动处理。文转图使用 AstrBot 内置能力，无需额外安装。
+插件依赖 `aiohttp` + `aiofiles` + `aiohttp-socks`，AstrBot 安装插件时自动处理。文转图使用 AstrBot 内置能力，无需额外安装。
 
 ### Q8：Docker 部署时搜索很慢 / 卡片封面全是占位 / 工具报 timeout？
 

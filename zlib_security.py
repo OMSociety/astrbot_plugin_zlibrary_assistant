@@ -1,7 +1,7 @@
 """URL 安全校验：SSRF 纵深防护（参照 reverse_searcher 的 utils/security.py）。
 
 Z-Library 的封面 CDN 地址与下载直链均来自 API 响应（第三方内容），
-请求前必须校验为公网 http/https 地址：内网 / 环回 / 链路本地 / 云元数据 /
+请求前必须校验为公网 http/https 地址，或显式启用的 v3 onion 地址：内网 / 环回 / 链路本地 / 云元数据 /
 保留 / 多播 IP 全部拒绝；域名做 DNS 解析二次校验（防 rebinding）；
 重定向不自动跟随，由调用方逐跳校验（见 zlib_client._guarded_get）。
 
@@ -84,7 +84,9 @@ def _resolve_host_ips(host: str) -> list[str] | None:
     return ips
 
 
-def is_safe_public_url(url: str, *, dns_check: bool = True) -> tuple[bool, str]:
+def is_safe_public_url(
+    url: str, *, dns_check: bool = True, allow_onion: bool = False
+) -> tuple[bool, str]:
     """校验 URL 是否为可安全请求的公网 http/https 地址。
 
     返回 (是否安全, 拒绝原因)；拒绝原因仅用于日志，通过时为空串。
@@ -107,6 +109,16 @@ def is_safe_public_url(url: str, *, dns_check: bool = True) -> tuple[bool, str]:
     if not host:
         return False, "URL 缺少主机名"
     host_lower = host.lower()
+
+    if host_lower.endswith(".onion"):
+        label = host_lower[:-6]
+        if (
+            allow_onion
+            and len(label) == 56
+            and all(c in "abcdefghijklmnopqrstuvwxyz234567" for c in label)
+        ):
+            return True, ""
+        return False, "onion 地址未启用或格式不是 v3"
 
     if host_lower in _BLOCKED_HOSTNAMES or host_lower in _BLOCKED_METADATA_HOSTNAMES:
         return False, "主机名在黑名单"

@@ -42,7 +42,7 @@ async def _attach_covers(client: ZlibClient, books: list[dict]) -> list[dict]:
             return b  # 无封面或已是 data URI 的条目直接跳过
         if not url.startswith(("http://", "https://")):
             # 相对路径（如 /covers/xx.jpg）→ 拼成完整 URL
-            url = f"https://{client.domain}/{url.lstrip('/')}"
+            url = f"{client._base_url()}/{url.lstrip('/')}"
         async with sem:
             data_uri, err = await client.fetch_cover_base64(url)
         if data_uri:
