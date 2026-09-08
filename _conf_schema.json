@@ -53,7 +53,7 @@
     "description": "HTTP 或 SOCKS 代理（可选）",
     "type": "string",
     "default": "",
-    "hint": "普通域名可填 http://IP:端口；onion 必须填 Tor SOCKS，Docker Compose 通常为 socks5://tor:9050。Mihomo 不能直接代替 Tor"
+    "hint": "普通域名可填 http://IP:端口；onion 必须填 Tor SOCKS，Docker Compose 通常为 socks5://tor:9050。普通 HTTP/SOCKS 代理不能直接代替 Tor"
   },
   "max_download_mb": {
     "description": "单个下载文件体积上限（MiB）",
