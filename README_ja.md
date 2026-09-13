@@ -39,18 +39,18 @@
 チャットで探したい本をそのまま伝えると、LLM が自動で検索ツールを呼び出し、**HTML カード画像**（表紙/タイトル/著者/形式/サイズ）と id 付きテキストリストを返します：
 
 ```
-用户: 帮我找一本马克思的《资本论》
-🤖 → zlib_search_books(query=资本论)
-    搜索「资本论」命中 N 本，卡片图已发送 ✅
+ユーザー: マルクスの『資本論』を探して
+🤖 → zlib_search_books(query=資本論)
+    「資本論」の検索で N 件ヒット、カード画像を送信しました ✅
 ```
 
 ### 書籍ダウンロード
 ひとこと言えばダウンロードされ、ファイルは自動で会話に送信されます：
 
 ```
-用户: 下载第 1 本
-🤖 → zlib_download_book(book_id=搜索结果中的id)
-    下载完成 ✅ 已发送 PDF 文件，账号剩余额度 9 次
+ユーザー: 1 冊目をダウンロードして
+🤖 → zlib_download_book(book_id=<検索結果の id>)
+    ダウンロード完了 ✅ PDF ファイルを送信しました。アカウントの残りクォータ: 9 回
 ```
 
 ### アカウントプールおよびクォータ管理
@@ -116,7 +116,7 @@ services:
   tor:
     build: ./data/plugins/astrbot_plugin_zlibrary_assistant/docker/tor
     restart: unless-stopped
-    # 如 Tor 需经过现有代理连接公网，再按实际类型启用：
+    # Tor が既存のプロキシを経由して公衆網に接続する必要がある場合は、実際の種類に応じて有効化：
     # environment:
     #   - TOR_UPSTREAM_PROXY=http://proxy-host:port
 ```
@@ -221,17 +221,17 @@ WebUI の設定パネルで入力するか、以下の構造を参考にして�
 プラグインは 3 つの LLM ツールを登録しており、モデルが呼び出しタイミングを自動判断します。ユーザーは自然な言葉で要望を伝えるだけです：
 
 ```
-用户: 帮我找一本马克思的《资本论》
-🤖 → zlib_search_books(query=资本论)
-    搜索「资本论」命中 N 本，卡片图已发送 ✅
+ユーザー: マルクスの『資本論』を探して
+🤖 → zlib_search_books(query=資本論)
+    「資本論」の検索で N 件ヒット、カード画像を送信しました ✅
 
-用户: 下载第 1 本
+ユーザー: 1 冊目をダウンロードして
 🤖 → zlib_download_book(book_id=123456)
-    下载完成 ✅ 已发送 PDF 文件，账号剩余额度 9 次
+    ダウンロード完了 ✅ PDF ファイルを送信しました。アカウントの残りクォータ: 9 回
 
-用户: 今天还能下载几本书？
+ユーザー: 今日あと何冊ダウンロードできますか？
 🤖 → zlib_get_status()
-    Z-Library 账号池状态：account1 ✅ 正常，今日下载 1/10 次
+    Z-Library アカウントプール状態: account1 ✅ 正常、今日のダウンロード 1/10 回
 ```
 
 ### zlib_search_books
@@ -298,11 +298,11 @@ HTML + Jinja2 テンプレートで、AstrBot 内蔵のテキスト画像化（`
    ```
 2. 起動中のコンテナに直接インストール：
    ```bash
-   docker exec -it <容器名> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"
+   docker exec -it <コンテナ名> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"
    ```
 3. パッケージをインストールせず、任意の中国語フォントファイル（例：Microsoft YaHei の `msyh.ttc`）を AstrBot の `data/` ディレクトリに `font.ttf` という名前で置く：
    ```bash
-   docker cp msyh.ttc <容器名>:/AstrBot/data/font.ttf
+   docker cp msyh.ttc <コンテナ名>:/AstrBot/data/font.ttf
    ```
 
 ### Q2：「Z-Library が現在の IP を制限しています」と表示される？

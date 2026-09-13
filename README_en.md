@@ -39,18 +39,18 @@
 Just say in the chat what book you are looking for; the LLM automatically calls the search tool and returns an **HTML card image** (cover/title/author/format/size) plus a text list with ids:
 
 ```
-用户: 帮我找一本马克思的《资本论》
-🤖 → zlib_search_books(query=资本论)
-    搜索「资本论」命中 N 本，卡片图已发送 ✅
+User: Find "Das Kapital" by Karl Marx
+🤖 → zlib_search_books(query=Das Kapital)
+    Found N matches for "Das Kapital", card image sent ✅
 ```
 
 ### Book Download
 Say the word and it downloads; the file is sent to the conversation automatically:
 
 ```
-用户: 下载第 1 本
-🤖 → zlib_download_book(book_id=搜索结果中的id)
-    下载完成 ✅ 已发送 PDF 文件，账号剩余额度 9 次
+User: Download book #1
+🤖 → zlib_download_book(book_id=<id from search results>)
+    Download complete ✅ PDF file sent, account quota remaining: 9
 ```
 
 ### Account Pool & Quota Management
@@ -116,7 +116,7 @@ services:
   tor:
     build: ./data/plugins/astrbot_plugin_zlibrary_assistant/docker/tor
     restart: unless-stopped
-    # 如 Tor 需经过现有代理连接公网，再按实际类型启用：
+    # If Tor needs to reach the public internet through your existing proxy, enable according to its actual type:
     # environment:
     #   - TOR_UPSTREAM_PROXY=http://proxy-host:port
 ```
@@ -221,17 +221,17 @@ Fill it in on the WebUI configuration panel, or refer to the following structure
 The plugin registers 3 LLM tools; the model decides automatically when to call them — you only need to state your needs in natural language:
 
 ```
-用户: 帮我找一本马克思的《资本论》
-🤖 → zlib_search_books(query=资本论)
-    搜索「资本论」命中 N 本，卡片图已发送 ✅
+User: Find "Das Kapital" by Karl Marx
+🤖 → zlib_search_books(query=Das Kapital)
+    Found N matches for "Das Kapital", card image sent ✅
 
-用户: 下载第 1 本
+User: Download book #1
 🤖 → zlib_download_book(book_id=123456)
-    下载完成 ✅ 已发送 PDF 文件，账号剩余额度 9 次
+    Download complete ✅ PDF file sent, account quota remaining: 9
 
-用户: 今天还能下载几本书？
+User: How many more books can I download today?
 🤖 → zlib_get_status()
-    Z-Library 账号池状态：account1 ✅ 正常，今日下载 1/10 次
+    Z-Library account pool status: account1 ✅ OK, 1/10 downloads used today
 ```
 
 ### zlib_search_books
@@ -298,11 +298,11 @@ HTML + Jinja2 templates, using AstrBot's built-in text-to-image (`html_renderer`
    ```
 2. Install directly in the running container:
    ```bash
-   docker exec -it <容器名> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"
+   docker exec -it <container_name> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"
    ```
 3. Without installing packages, put any Chinese font file (e.g. Microsoft YaHei `msyh.ttc`) into AstrBot's `data/` directory and name it `font.ttf`:
    ```bash
-   docker cp msyh.ttc <容器名>:/AstrBot/data/font.ttf
+   docker cp msyh.ttc <container_name>:/AstrBot/data/font.ttf
    ```
 
 ### Q2: It says "Z-Library is rate-limiting the current IP"?
