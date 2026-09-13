@@ -5,18 +5,23 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [1.1.0] - 2026-09-09
+## [1.1.0] - 2026-09-13
+
+### 🔒 安全
+
+- **Tor/onion 访问（可选）**：onion 地址仅允许 v3 格式且必须经 SOCKS 访问；重定向仍逐跳执行 SSRF 校验。
+- 下载改为边读边限长，避免异常响应耗尽 AstrBot 内存。
 
 ### ✨ 新增
 
+- **WebUI 四语本地化**：新增 `zh-CN` / `en-US` / `ru-RU` / `ja-JP` 四份 i18n 文件（`.astrbot-plugin/i18n/`），插件名、简介与全部配置项文案在四种界面语言下均正确显示；中文文案与配置 schema 保持逐字镜像。受 AstrBot i18n 机制限制，账号模板中「账号备注名」字段的说明在非中文界面回退显示中文 schema 文案。
 - 可选通过 Tor SOCKS 访问 v3 onion E-API，原有明网域名和 HTTP 代理配置保持兼容。
 - 提供可选 Tor Docker sidecar，支持使用现有 HTTP/SOCKS 服务作为 Tor 上游代理。
 - 新增可配置的单文件下载体积上限。
 
-### 🔒 安全
+### 🐛 修复
 
-- onion 地址仅允许 v3 格式且必须经 SOCKS 访问；重定向仍逐跳执行 SSRF 校验。
-- 下载改为边读边限长，避免异常响应耗尽 AstrBot 内存。
+- 修正 `metadata.yaml` 中 `Astrbot` 的拼写为 `AstrBot`。
 
 ### ⚙️ 变更
 
