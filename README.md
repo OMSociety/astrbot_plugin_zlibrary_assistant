@@ -1,3 +1,5 @@
+<p align="center"><strong>中文</strong> · <a href="README_en.md">English</a> · <a href="README_ru.md">Русский</a> · <a href="README_ja.md">日本語</a></p>
+
 <div align="center">
 
 <img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="120" alt="ZLibrary Assistant Logo" />
@@ -6,13 +8,13 @@
 
 **Z-Library 图书搜索与下载助手** —— 图书搜索 · 一键下载 · 账号池轮换 · HTML 卡片结果 · 额度管控
 
-[![Version](https://img.shields.io/badge/version-1.0.4-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
 [![Issues](https://img.shields.io/github/issues/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues)
 
-[✨ 核心特性](#-核心特性) • [📖 功能概览](#-功能概览) • [🚀 快速开始](#-快速开始) • [⚙️ 配置项说明](#️-配置项说明) • [🛠️ LLM 可调用工具](#️-llm-可调用工具) • [🧩 架构](#-架构) • [🔧 常见问题](#-常见问题) • [📝 更新日志](CHANGELOG.md)
+[✨ 核心特性](#-核心特性) • [📖 功能概览](#-功能概览) • [🚀 快速开始](#-快速开始) • [🧅 Tor/onion 部署](#-toronion-部署) • [⚙️ 配置项说明](#️-配置项说明) • [🛠️ LLM 可调用工具](#️-llm-可调用工具) • [🧩 架构](#-架构) • [🔧 常见问题](#-常见问题) • [📝 更新日志](CHANGELOG.md)
 
 </div>
 
@@ -89,10 +91,79 @@ IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常 全部分�
 
 保存后重启 AstrBot，即可在对话中直接搜书、下载。
 
-> 💡 国内服务器需在 `proxy` 填代理（如 `http://127.0.0.1:7897`），境外服务器可留空。如需使用稳定的 onion 入口，请参阅 [Tor/onion 部署指南](README_ONION.md)。
+> 💡 国内服务器需在 `proxy` 填代理（如 `http://127.0.0.1:7897`），境外服务器可留空。如需使用稳定的 onion 入口，请参阅 [Tor/onion 部署](#-toronion-部署)。
 
 ### 依赖安装
-插件依赖 `aiohttp` + `aiofiles` + `aiohttp-socks`，AstrBot 安装插件时自动处理，无需额外安装。
+插件依赖 `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow`，AstrBot 安装插件时自动处理，无需额外安装。
+
+---
+
+## 🧅 Tor/onion 部署
+
+插件可选通过 Tor 访问 Z-Library onion E-API，并保留原有明网域名和 HTTP 代理配置的向后兼容。它提供原有的 3 个 LLM 工具：
+
+- `zlib_search_books`：搜索图书
+- `zlib_download_book`：按搜索结果 id 下载
+- `zlib_get_status`：查看账号和额度
+
+网络请求通过 SOCKS5 进入 Tor，`.onion` DNS 解析在 Tor 端完成。插件不提供任意 URL 浏览工具，避免 Bot 被提示注入后变成开放代理。
+
+### Docker 部署
+
+1. 正常安装 `astrbot_plugin_zlibrary_assistant`。
+2. 把下面的 `tor` 服务合并到 AstrBot 的 `docker-compose.yml`（不要映射 9050 到公网）：
+
+```yaml
+services:
+  tor:
+    build: ./data/plugins/astrbot_plugin_zlibrary_assistant/docker/tor
+    restart: unless-stopped
+    # 如 Tor 需经过现有代理连接公网，再按实际类型启用：
+    # environment:
+    #   - TOR_UPSTREAM_PROXY=http://proxy-host:port
+```
+
+3. 确保 AstrBot 和 `tor` 在同一个 Compose 网络，重建并启动：
+
+```bash
+docker compose up -d --build tor astrbot
+```
+
+4. 在 AstrBot 插件配置中填写：
+
+```json
+{
+  "domain": "http://loginzlib2vrak5zzpcocc3ouizykn6k5qecgj2tzlnab5wcbqhembyd.onion",
+  "proxy": "socks5://tor:9050",
+  "max_download_mb": 80,
+  "search_limit": 5,
+  "accounts": []
+}
+```
+
+普通 HTTP/SOCKS 代理不是 onion 路由器，不能代替 Tor。插件始终连接 `socks5://tor:9050`；如 Tor 本身需要上游代理，再依现有服务的实际协议配置 `TOR_UPSTREAM_PROXY=http://proxy-host:port` 或 `TOR_UPSTREAM_PROXY=socks5://proxy-host:port`。上游服务的名称、地址和端口均按实际部署填写。
+
+账号配置与原插件相同。推荐 `remix_userid` + `remix_userkey`，避免频繁调用登录端点。
+
+### 非 Docker 部署
+
+先安装并启动 Tor，使 SOCKS 端口只监听本机，然后将 `proxy` 设为 `socks5://127.0.0.1:9050`。如果 AstrBot 在 Docker、Tor 在宿主机，Docker Desktop 通常使用 `socks5://host.docker.internal:9050`，同时需要让 Tor 监听 Docker 可达的接口并用防火墙限制来源。
+
+### 安全约束
+
+- 只接受 HTTP/HTTPS；`.onion` 必须是 56 字符的 v3 地址。
+- `.onion` 请求必须配置 SOCKS 代理，禁止本机 DNS 解析。
+- API 返回的重定向每一跳都重新做 SSRF 校验。
+- 单文件默认最多 80 MiB，避免异常响应耗尽内存。
+- Tor 服务不发布宿主机端口，仅供 Compose 内部网络使用。
+
+### 验证
+
+```bash
+python -m pytest -q
+```
+
+实际连通性还取决于 Tor 是否完成 bootstrap、目标 onion 是否在线，以及账号凭据是否有效。
 
 ---
 
@@ -200,7 +271,7 @@ Z-Library 安卓客户端内部接口（非官方 E-API）的异步封装：
 - 错误分类：`rate_limited` / `auth_failed` / `quota_exhausted` / `domain_invalid` / `network_error` / `api_error`
 - 书籍缓存持久化到磁盘，AstrBot 重启后仍可凭 id 直接下载
 - mojibake 修复：Z-Library 返回的双重编码文本自动还原
-- 域名自动规范化（剥掉 `http(s)://` 前缀）；下载文件名自动清洗 Windows 非法字符
+- 域名自动规范化（无协议时普通域名补 `https://`、onion 补 `http://`；不接受带路径的地址）；下载文件名自动清洗 Windows 非法字符
 
 ### 工具层（tools/）
 三个 `FunctionTool` 通过 `add_llm_tools` 注册，LLM 在对话中自动识别调用：
@@ -264,7 +335,7 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 
 > 提示：`remix_userkey` 长期有效，配置一次即可长期使用。
 
-### Q6：下载完成但发不出文件，提示 "Sandbox runtime is disabled"？
+### Q6：下载完成但发不出文件，提示 "Sandbox runtime is disabled by configuration"？
 
 **原因**：AstrBot 的 `send_message_to_user` 发送本地文件依赖 **Computer Use 本地运行时**（`computer_use_runtime`），而 AstrBot 默认是 `none`，导致本地文件被沙盒拦截。
 
@@ -283,16 +354,16 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 
 ### Q7：需要配置哪些依赖？
 
-插件依赖 `aiohttp` + `aiofiles` + `aiohttp-socks`，AstrBot 安装插件时自动处理。文转图使用 AstrBot 内置能力，无需额外安装。
+插件依赖 `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow`，AstrBot 安装插件时自动处理。文转图使用 AstrBot 内置能力，无需额外安装。
 
 ### Q8：Docker 部署时搜索很慢 / 卡片封面全是占位 / 工具报 timeout？
 
-**原因**：Docker 容器是独立网络环境，配置里填 `http://127.0.0.1:7897` 指向的是**容器自己**（里面没有你的代理），封面下载全部失败（显示占位），且云端文转图在容器内可能连不上，渲染拖满整个工具超时（AstrBot 默认 `tool_call_timeout` 60 秒）。
+**原因**：Docker 容器是独立网络环境，配置里填 `http://127.0.0.1:7897` 指向的是**容器自己**（里面没有你的代理），封面下载全部失败（显示占位），且云端文转图在容器内可能连不上，渲染拖满整个工具超时（AstrBot 默认 `tool_call_timeout` 120 秒）。
 
 **解决**：
 1. **代理填容器能访问到的地址**：格式 `http://IP:端口`；代理需要账号密码时用 `http://用户名:密码@IP:端口`（如 `http://user:pass@IP:port`），插件基于 aiohttp，自动发送 `Proxy-Authorization` 认证头。Windows/Mac Docker Desktop 可用 `http://host.docker.internal:端口`；Linux 用宿主机局域网 IP，并确保代理软件开启了「允许局域网连接」
 2. 若云端文转图不可达：插件已内置**25 秒渲染超时保护**，渲染失败会自动降级为纯文本书单（不会整个工具报错），可接受的话无需处理
-3. 仍嫌时间紧：在 AstrBot 配置 `provider_settings.tool_call_timeout` 调大（如 `120`）
+3. 仍嫌时间紧：在 AstrBot 配置 `agent_runner.config.misc.tool_call_timeout` 调大（如 `240`）
 
 ---
 

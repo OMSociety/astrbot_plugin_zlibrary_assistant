@@ -110,7 +110,7 @@ def _build_render_data(books: list[dict], query: str) -> dict:
 async def _render_book_card(books: list[dict], query: str) -> str | None:
     """渲染书籍卡片图片，返回本地图片路径；失败/超时返回 None（调用方降级）。
 
-    用 asyncio.wait_for 限定渲染时长：AstrBot 对工具整体有 60 秒超时
+    用 asyncio.wait_for 限定渲染时长：AstrBot 对工具整体有 120 秒超时
     （tool_call_timeout），若渲染服务慢/不可达而一直等，工具会被整体掐断
     报 timeout（连降级的机会都没有）。限定 25 秒后超时即降级纯文本。
     """

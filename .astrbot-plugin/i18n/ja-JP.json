@@ -1,0 +1,50 @@
+{
+  "metadata": {
+    "display_name": "Z-Library アシスタント",
+    "desc": "AstrBot に Z-Library の書籍検索・ダウンロード機能を提供します（アカウントプール、HTML カード形式の結果、クォータ管理）。"
+  },
+  "config": {
+    "accounts": {
+      "description": "Z-Library アカウントプール（複数のアカウントを追加でき、ダウンロード時は残りクォータが最も多いアカウントへ自動的に切り替わります）",
+      "hint": "各アカウントは毎日独立したダウンロードクォータを持ちます（無料アカウントで 1 日約 10 回）。アカウントを増やすと 1 日の合計ダウンロード回数を増やせます。remix 認証情報を使う方式（最下部の 2 項目）を推奨します。Z-Library のログイン時のリスク管理の影響をほとんど受けません。",
+      "templates": {
+        "account": {
+          "name": "アカウント",
+          "hint": "複数のアカウントを追加すると 1 日のダウンロードクォータを共有できます（無料アカウント 1 つあたり 1 日約 10 回）",
+          "email": {
+            "description": "アカウントのメールアドレス（方式 1）",
+            "hint": "パスワードとペアで入力します。ログインに成功すると、プラグインが自動的に remix 認証情報を取得します。注意：login エンドポイントは共有 IP に対して Z-Library のログイン時のリスク管理に引っかかりやすいです（#ipd3）。レート制限が続く場合は、下の remix 方式に切り替えてください。"
+          },
+          "password": {
+            "description": "アカウントのパスワード（方式 1）",
+            "hint": "Z-Library アカウントのパスワード。メールアドレスとペアで入力します"
+          },
+          "remix_userid": {
+            "description": "remix_userid（方式 2、推奨）",
+            "hint": "取得方法：ブラウザで z-library.sk にログインし、F12 → Application → Storage/Cookies → remix_userid の値をコピーします。remix_userkey とペアで入力します。プラグインは GET profile で検証するため、login エンドポイントのリスク管理の影響を受けません。"
+          },
+          "remix_userkey": {
+            "description": "remix_userkey（方式 2、推奨）",
+            "hint": "同上。Cookie 内の remix_userkey（長い英数字の文字列）で、長期間そのまま使えます。両方の方式を入力した場合は remix が優先されます。"
+          }
+        }
+      }
+    },
+    "domain": {
+      "description": "Z-Library E-API のドメインまたは完全な URL",
+      "hint": "通常ドメイン、https:// から始まる完全なアドレス、または http://...onion を入力できます（/eapi パスは不要）。onion モードでは Tor の SOCKS プロキシも必要です"
+    },
+    "proxy": {
+      "description": "HTTP または SOCKS プロキシ（任意）",
+      "hint": "通常ドメインは http://IP:ポート。onion には Tor の SOCKS が必須で、Docker Compose では通常 socks5://tor:9050。通常の HTTP/SOCKS プロキシは Tor の代わりになりません"
+    },
+    "max_download_mb": {
+      "description": "単一ファイルのダウンロード上限（MiB）",
+      "hint": "異常なレスポンスで AstrBot のメモリを使い果たさないための上限です。有効範囲は 1〜512 MiB"
+    },
+    "search_limit": {
+      "description": "検索のデフォルト返却件数",
+      "hint": "LLM が件数を指定しない場合に使用するデフォルト値です。範囲は 1〜8（8 を超えると制限されます。カード画像が大きくなりすぎるのを防ぐため）"
+    }
+  }
+}

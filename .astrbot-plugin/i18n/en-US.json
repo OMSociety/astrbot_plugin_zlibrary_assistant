@@ -1,0 +1,50 @@
+{
+  "metadata": {
+    "display_name": "Z-Library Assistant",
+    "desc": "Adds Z-Library book search and download to AstrBot (account pool, HTML card results, quota control)."
+  },
+  "config": {
+    "accounts": {
+      "description": "Z-Library account pool (add multiple accounts; downloads automatically rotate to the account with the most remaining quota)",
+      "hint": "Each account has its own daily download quota (about 10 per day on a free account); more accounts raise the total daily download count. The remix credential method (last two fields) is recommended, as it is almost unaffected by Z-Library login risk control.",
+      "templates": {
+        "account": {
+          "name": "Account",
+          "hint": "Add multiple accounts to share the daily download quota (about 10 per day per free account)",
+          "email": {
+            "description": "Account email (method 1)",
+            "hint": "Fill in together with the password; after a successful login the plugin automatically exchanges it for remix credentials. Note: the login endpoint is easily flagged by Z-Library risk control for shared IPs (#ipd3). If you keep getting rate-limited, switch to the remix method below."
+          },
+          "password": {
+            "description": "Account password (method 1)",
+            "hint": "Z-Library account password, paired with the email"
+          },
+          "remix_userid": {
+            "description": "remix_userid (method 2, recommended)",
+            "hint": "How to get it: log in to z-library.sk in a browser, press F12 → Application → Storage/Cookies → copy the value of remix_userid. Fill it in together with remix_userkey; the plugin verifies via GET profile and is not affected by risk control on the login endpoint."
+          },
+          "remix_userkey": {
+            "description": "remix_userkey (method 2, recommended)",
+            "hint": "Same as above — the remix_userkey from the Cookie (a long alphanumeric string); it stays valid for a long time. If both methods are filled in, remix takes priority."
+          }
+        }
+      }
+    },
+    "domain": {
+      "description": "Z-Library E-API domain or full URL",
+      "hint": "Enter a plain domain, a full https:// URL, or http://...onion; do not include the /eapi path. Onion mode also requires a Tor SOCKS proxy"
+    },
+    "proxy": {
+      "description": "HTTP or SOCKS proxy (optional)",
+      "hint": "For plain domains use http://IP:port; onion requires Tor SOCKS, usually socks5://tor:9050 in Docker Compose. A plain HTTP/SOCKS proxy cannot replace Tor"
+    },
+    "max_download_mb": {
+      "description": "Max single-file download size (MiB)",
+      "hint": "Prevents abnormal responses from exhausting AstrBot memory; valid range 1-512 MiB"
+    },
+    "search_limit": {
+      "description": "Default number of search results",
+      "hint": "The default used when the LLM does not specify a count. Range 1-8 (values above 8 are clamped to prevent oversized card images)"
+    }
+  }
+}

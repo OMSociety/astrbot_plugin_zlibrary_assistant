@@ -1,0 +1,50 @@
+{
+  "metadata": {
+    "display_name": "Zlibrary助手",
+    "desc": "为 AstrBot 提供 Z-Library 图书搜索与下载能力（账号池、HTML 卡片结果、额度管控）"
+  },
+  "config": {
+    "accounts": {
+      "templates": {
+        "account": {
+          "name": "账号",
+          "hint": "添加多个账号可共享每日下载额度（每个账号免费约 10 次/天）",
+          "email": {
+            "description": "账号邮箱（方式一）",
+            "hint": "与密码成对填写；登录成功后插件会自动换取 remix 凭证。注意：login 端点易被 Z-Library 对共享 IP 风控（#ipd3），若一直提示限流请改用下方 remix 方式"
+          },
+          "password": {
+            "description": "账号密码（方式一）",
+            "hint": "Z-Library 账号密码，与邮箱成对"
+          },
+          "remix_userid": {
+            "description": "remix_userid（方式二，推荐）",
+            "hint": "获取方法：浏览器登录 z-library.sk 后按 F12 → Application/应用 → Storage/Cookies → 复制 remix_userid 的值。与 remix_userkey 成对填写，插件走 GET profile 验证，不受 login 端点风控影响"
+          },
+          "remix_userkey": {
+            "description": "remix_userkey（方式二，推荐）",
+            "hint": "同上，Cookie 中的 remix_userkey（一长串字母数字），长期有效。两种方式都填时 remix 优先"
+          }
+        }
+      },
+      "description": "Z-Library 账号池（可添加多个账号，下载时自动轮换到剩余额度最多的账号）",
+      "hint": "每个账号每日独立下载额度（免费约 10 次/天），多账号可提高每日总下载次数。推荐使用 remix 凭证方式（最下面两项），几乎不受 Z-Library 登录风控影响。"
+    },
+    "domain": {
+      "description": "Z-Library E-API 域名或完整地址",
+      "hint": "可填普通域名、https:// 完整地址，或 http://...onion；不要带 /eapi 路径。onion 模式需同时配置 Tor SOCKS 代理"
+    },
+    "proxy": {
+      "description": "HTTP 或 SOCKS 代理（可选）",
+      "hint": "普通域名可填 http://IP:端口；onion 必须填 Tor SOCKS，Docker Compose 通常为 socks5://tor:9050。普通 HTTP/SOCKS 代理不能直接代替 Tor"
+    },
+    "max_download_mb": {
+      "description": "单个下载文件体积上限（MiB）",
+      "hint": "防止异常响应耗尽 AstrBot 内存；有效范围 1-512 MiB"
+    },
+    "search_limit": {
+      "description": "搜索默认返回条数",
+      "hint": "LLM 不指定条数时使用的默认值，范围 1-8（超过 8 会被限制，防止卡片图片过大）"
+    }
+  }
+}
