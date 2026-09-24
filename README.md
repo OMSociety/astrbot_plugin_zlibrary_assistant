@@ -4,7 +4,7 @@
 
 <img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="120" alt="ZLibrary Assistant Logo" />
 
-# 📚 Zlibrary 助手
+# Zlibrary 助手
 
 **Z-Library 图书搜索与下载助手** —— 图书搜索 · 一键下载 · 账号池轮换 · HTML 卡片结果 · 额度管控
 
@@ -14,28 +14,28 @@
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
 [![Issues](https://img.shields.io/github/issues/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues)
 
-[✨ 核心特性](#-核心特性) • [📖 功能概览](#-功能概览) • [🚀 快速开始](#-快速开始) • [🧅 Tor/onion 部署](#-toronion-部署) • [⚙️ 配置项说明](#️-配置项说明) • [🛠️ LLM 可调用工具](#️-llm-可调用工具) • [🧩 架构](#-架构) • [🔧 常见问题](#-常见问题) • [📝 更新日志](CHANGELOG.md)
+[核心特性](#核心特性) • [功能概览](#功能概览) • [快速开始](#快速开始) • [Tor/onion 部署](#toronion-部署) • [配置项说明](#配置项说明) • [LLM 可调用工具](#llm-可调用工具) • [架构](#架构) • [常见问题](#常见问题) • [更新日志](CHANGELOG.md)
 
 </div>
 
-> 🎨 本项目由 AI 编写
+> 本项目由 AI 编写
 
 ---
 
-## ✨ 核心特性
+## 核心特性
 
 | 特性 | 说明 |
 |------|------|
-| 🔍 **图书搜索** | 关键词搜索 Z-Library（3300 万+ 本书），返回 HTML 卡片图片（封面/标题/作者/格式/大小）+ 带 id 的文本列表 |
-| 📥 **一键下载** | 说一声就下载，文件自动发送到会话，支持 pdf / epub / mobi 等格式 |
-| 👥 **账号池轮换** | 多账号共享每日下载额度，自动挑选剩余额度最多的账号，耗尽拒绝并友好提示 |
-| 🔑 **双凭据方式** | `remix_userid+remix_userkey`（绕开 login 端点风控）或 `email+password`（自动换取 remix 凭证） |
-| 🎴 **HTML 卡片结果** | 搜索结果渲染为统一卡片图片，封面加载失败自动降级渐变占位，卡片不空白 |
-| 🛡️ **错误分类** | IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常全部分类处理，友好中文提示，插件不崩溃 |
+| **图书搜索** | 关键词搜索 Z-Library（3300 万+ 本书），返回 HTML 卡片图片（封面/标题/作者/格式/大小）+ 带 id 的文本列表 |
+| **一键下载** | 说一声就下载，文件自动发送到会话，支持 pdf / epub / mobi 等格式 |
+| **账号池轮换** | 多账号共享每日下载额度，自动挑选剩余额度最多的账号，耗尽拒绝并友好提示 |
+| **双凭据方式** | `remix_userid+remix_userkey`（绕开 login 端点风控）或 `email+password`（自动换取 remix 凭证） |
+| **HTML 卡片结果** | 搜索结果渲染为统一卡片图片，封面加载失败自动降级渐变占位，卡片不空白 |
+| **错误分类** | IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常全部分类处理，友好中文提示，插件不崩溃 |
 
 ---
 
-## 📖 功能概览
+## 功能概览
 
 ### 图书搜索
 聊天中直接说想找什么书，LLM 自动调用搜索工具，返回 **HTML 卡片图片**（封面/标题/作者/格式/大小）和带 id 的文本列表：
@@ -68,17 +68,11 @@ IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常 全部分�
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
 ### 第一步：安装
 
-**方式一：插件市场**
-- AstrBot WebUI → 插件市场 → 通过 GitHub 安装 `astrbot_plugin_zlibrary_assistant`
-
-**方式二：手动安装**
-1. 将插件文件夹放入 `/AstrBot/data/plugins/`
-2. 重启 AstrBot
-3. 在管理面板按需配置各项参数
+AstrBot WebUI → 插件市场 → 通过 GitHub 安装 `astrbot_plugin_zlibrary_assistant`
 
 ### 第二步：最小配置（跑通搜索与下载）
 
@@ -91,14 +85,14 @@ IP 限流 / 域名失效 / 登录失效 / 额度耗尽 / 网络异常 全部分�
 
 保存后重启 AstrBot，即可在对话中直接搜书、下载。
 
-> 💡 国内服务器需在 `proxy` 填代理（如 `http://127.0.0.1:7897`），境外服务器可留空。如需使用稳定的 onion 入口，请参阅 [Tor/onion 部署](#-toronion-部署)。
+> **提示：**国内服务器需在 `proxy` 填代理（如 `http://127.0.0.1:7897`），境外服务器可留空。如需使用稳定的 onion 入口，请参阅 [Tor/onion 部署](#toronion-部署)。
 
 ### 依赖安装
 插件依赖 `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow`，AstrBot 安装插件时自动处理，无需额外安装。
 
 ---
 
-## 🧅 Tor/onion 部署
+## Tor/onion 部署
 
 插件可选通过 Tor 访问 Z-Library onion E-API，并保留原有明网域名和 HTTP 代理配置的向后兼容。它提供原有的 3 个 LLM 工具：
 
@@ -167,7 +161,7 @@ python -m pytest -q
 
 ---
 
-## ⚙️ 配置项说明
+## 配置项说明
 
 ### 账号设置
 
@@ -218,7 +212,7 @@ python -m pytest -q
 
 ---
 
-## 🛠️ LLM 可调用工具
+## LLM 可调用工具
 
 插件注册 3 个 LLM 工具，模型会自动判断何时调用，你只需用自然语言说需求：
 
@@ -262,7 +256,7 @@ python -m pytest -q
 
 ---
 
-## 🧩 架构
+## 架构
 
 ### eapi 客户端（zlib_client.py）
 Z-Library 安卓客户端内部接口（非官方 E-API）的异步封装：
@@ -287,7 +281,7 @@ HTML + Jinja2 模板，走 AstrBot 内置文转图（`html_renderer`）：
 
 ---
 
-## 🔧 常见问题
+## 常见问题
 
 ### Q1：Docker 部署时搜索结果图片里的中文变成方块/乱码？
 
@@ -333,7 +327,7 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 2. 在插件配置 `accounts` 中填 `remix_userid` 和 `remix_userkey`（留空 email/password）
 3. 插件将用 GET `/eapi/user/profile` 验证并正常使用搜索/下载
 
-> 提示：`remix_userkey` 长期有效，配置一次即可长期使用。
+> **提示：**`remix_userkey` 长期有效，配置一次即可长期使用。
 
 ### Q6：下载完成但发不出文件，提示 "Sandbox runtime is disabled by configuration"？
 
@@ -365,30 +359,18 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 2. 若云端文转图不可达：插件已内置**25 秒渲染超时保护**，渲染失败会自动降级为纯文本书单（不会整个工具报错），可接受的话无需处理
 3. 仍嫌时间紧：在 AstrBot 配置 `agent_runner.config.misc.tool_call_timeout` 调大（如 `240`）
 
----
+## 更新日志
 
-## 📝 更新日志
+> **[查看完整更新日志 →](CHANGELOG.md)**
 
-> 📋 **[查看完整更新日志 →](CHANGELOG.md)**
+## 支持与致谢
 
----
-
-## ⭐ 支持本项目
-
-如果这个插件对你有帮助，欢迎点亮 Star ⭐，有问题和建议请提交 [Issue](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues) 或 [Pull Request](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/pulls)。
-
-## 🙏 致谢
+如果这个插件对你有帮助，欢迎点亮 Star，有问题和建议请提交 [Issue](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues) 或 [Pull Request](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/pulls)。
 
 - [AstrBot](https://github.com/AstrBotDevs/AstrBot) 开源聊天机器人框架
 
----
-
-## 📜 许可证
+## 许可证与作者
 
 本项目采用 **MIT License** 开源协议。
-
----
-
-## 👤 作者
 
 [@OMSociety](https://github.com/OMSociety)

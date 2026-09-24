@@ -4,7 +4,7 @@
 
 <img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="120" alt="ZLibrary Assistant Logo" />
 
-# 📚 Zlibrary Assistant
+# Zlibrary Assistant
 
 **Z-Library book search & download assistant** — book search · one-click download · account pool rotation · HTML card results · quota management
 
@@ -16,24 +16,24 @@
 
 </div>
 
-> 🎨 This project was written by AI
+> This project was written by AI
 
 ---
 
-## ✨ Core Features
+## Core Features
 
 | Feature | Description |
 |------|------|
-| 🔍 **Book Search** | Keyword search on Z-Library (33 million+ books), returns an HTML card image (cover/title/author/format/size) + a text list with ids |
-| 📥 **One-Click Download** | Just say the word and the file is sent to the conversation automatically; supports pdf / epub / mobi and more |
-| 👥 **Account Pool Rotation** | Multiple accounts share the daily download quota; the account with the most remaining quota is picked automatically, and a friendly message is shown when exhausted |
-| 🔑 **Dual Credential Methods** | `remix_userid+remix_userkey` (bypasses login endpoint risk control) or `email+password` (automatically exchanged for remix credentials) |
-| 🎴 **HTML Card Results** | Search results are rendered into uniform card images; failed cover loads automatically fall back to a gradient placeholder, so cards are never blank |
-| 🛡️ **Error Classification** | IP rate limiting / invalid domain / expired login / exhausted quota / network errors are all handled by category with friendly messages; the plugin does not crash |
+| **Book Search** | Keyword search on Z-Library (33 million+ books), returns an HTML card image (cover/title/author/format/size) + a text list with ids |
+| **One-Click Download** | Just say the word and the file is sent to the conversation automatically; supports pdf / epub / mobi and more |
+| **Account Pool Rotation** | Multiple accounts share the daily download quota; the account with the most remaining quota is picked automatically, and a friendly message is shown when exhausted |
+| **Dual Credential Methods** | `remix_userid+remix_userkey` (bypasses login endpoint risk control) or `email+password` (automatically exchanged for remix credentials) |
+| **HTML Card Results** | Search results are rendered into uniform card images; failed cover loads automatically fall back to a gradient placeholder, so cards are never blank |
+| **Error Classification** | IP rate limiting / invalid domain / expired login / exhausted quota / network errors are all handled by category with friendly messages; the plugin does not crash |
 
 ---
 
-## 📖 Feature Overview
+## Feature Overview
 
 ### Book Search
 Just say in the chat what book you are looking for; the LLM automatically calls the search tool and returns an **HTML card image** (cover/title/author/format/size) plus a text list with ids:
@@ -66,17 +66,11 @@ IP rate limiting / invalid domain / expired login / exhausted quota / network er
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Step 1: Installation
 
-**Method 1: Plugin Marketplace**
-- AstrBot WebUI → Plugin Marketplace → install `astrbot_plugin_zlibrary_assistant` from GitHub
-
-**Method 2: Manual Installation**
-1. Put the plugin folder into `/AstrBot/data/plugins/`
-2. Restart AstrBot
-3. Configure the parameters as needed in the management panel
+AstrBot WebUI → Plugin Marketplace → install `astrbot_plugin_zlibrary_assistant` from GitHub
 
 ### Step 2: Minimal Configuration (get search & download running)
 
@@ -89,14 +83,14 @@ Just add one account under `accounts` on the plugin configuration page in the We
 
 After saving, restart AstrBot and you can search and download books directly in the conversation.
 
-> 💡 Servers in mainland China need a proxy in `proxy` (e.g. `http://127.0.0.1:7897`); servers outside China can leave it empty. If you want to use a stable onion entrance, see the [Tor/onion Deployment](#-toronion-deployment).
+> **Note:** Servers in mainland China need a proxy in `proxy` (e.g. `http://127.0.0.1:7897`); servers outside China can leave it empty. If you want to use a stable onion entrance, see the [Tor/onion Deployment](#toronion-deployment).
 
 ### Dependencies
 The plugin depends on `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow`; AstrBot handles them automatically when installing the plugin, no extra steps needed.
 
 ---
 
-## 🧅 Tor/onion Deployment
+## Tor/onion Deployment
 
 Optionally, the plugin can reach the Z-Library onion E-API through Tor while keeping full backward compatibility with the existing clearnet domain and HTTP proxy settings. It provides the same 3 LLM tools:
 
@@ -165,7 +159,7 @@ Actual connectivity also depends on whether Tor has finished bootstrapping, whet
 
 ---
 
-## ⚙️ Configuration Reference
+## Configuration Reference
 
 ### Account Settings
 
@@ -216,7 +210,7 @@ Fill it in on the WebUI configuration panel, or refer to the following structure
 
 ---
 
-## 🛠️ LLM-Callable Tools
+## LLM-Callable Tools
 
 The plugin registers 3 LLM tools; the model decides automatically when to call them — you only need to state your needs in natural language:
 
@@ -260,7 +254,7 @@ Queries the login status and remaining daily download quota of each account in t
 
 ---
 
-## 🧩 Architecture
+## Architecture
 
 ### eapi client (zlib_client.py)
 An async wrapper around the internal interface of the Z-Library Android client (unofficial E-API):
@@ -285,7 +279,7 @@ HTML + Jinja2 templates, using AstrBot's built-in text-to-image (`html_renderer`
 
 ---
 
-## 🔧 FAQ
+## FAQ
 
 ### Q1: In Docker deployments, Chinese characters in search-result card images turn into boxes/mojibake?
 
@@ -331,7 +325,7 @@ Free Z-Library accounts have a limited number of daily downloads (about 10/day).
 2. Fill `remix_userid` and `remix_userkey` in the plugin's `accounts` configuration (leave email/password empty)
 3. The plugin will verify via GET `/eapi/user/profile`, and search/download will work normally
 
-> Tip: `remix_userkey` is valid long-term; configure it once and it keeps working.
+> **Tip:** `remix_userkey` is valid long-term; configure it once and it keeps working.
 
 ### Q6: Download completes but the file cannot be sent, with "Sandbox runtime is disabled by configuration"?
 
@@ -363,30 +357,18 @@ The plugin depends on `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow`; AstrB
 2. If the cloud text-to-image is unreachable: the plugin has a built-in **25-second rendering timeout protection**; on rendering failure it automatically falls back to a plain-text book list (the whole tool does not error out), so no action is needed if that is acceptable
 3. If time is still tight: increase AstrBot's `agent_runner.config.misc.tool_call_timeout` (e.g. `240`)
 
----
+## Changelog
 
-## 📝 Changelog
+> **[View the full changelog →](CHANGELOG.md)**
 
-> 📋 **[View the full changelog →](CHANGELOG.md)**
+## Support & Acknowledgements
 
----
-
-## ⭐ Support This Project
-
-If this plugin helps you, please consider giving it a Star ⭐; for issues and suggestions, feel free to open an [Issue](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues) or a [Pull Request](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/pulls).
-
-## 🙏 Acknowledgements
+If this plugin helps you, please consider giving it a Star; for issues and suggestions, feel free to open an [Issue](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues) or a [Pull Request](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/pulls).
 
 - [AstrBot](https://github.com/AstrBotDevs/AstrBot) open-source chatbot framework
 
----
-
-## 📜 License
+## License & Author
 
 This project is released under the **MIT License**.
-
----
-
-## 👤 Author
 
 [@OMSociety](https://github.com/OMSociety)
