@@ -16,6 +16,7 @@ from astrbot_plugin_zlibrary_assistant.zlib_client import (
     _normalize_base_url,
     _normalize_socks_proxy_url,
 )
+from conftest import FakeHeaders
 
 
 def _make_client() -> ZlibClient:
@@ -49,12 +50,23 @@ class TestBaseUrlAndProxy:
         assert _normalize_socks_proxy_url(raw) == expected
 
 
-class _CtxResp:
-    """_request_json 用法：async with session.request(...) as resp: await resp.text()"""
+class _CtxContent:
+    """_request_json 用法：await resp.content.read(n) 取字节后自行解码。"""
 
-    def __init__(self, status=200, text="{}"):
+    def __init__(self, body: bytes):
+        self._body = body
+
+    async def read(self, n=-1):
+        return self._body if n is None or n < 0 else self._body[:n]
+
+
+class _CtxResp:
+    """_request_json 用法：async with session.request(...) as resp: 读 content 字节"""
+
+    def __init__(self, status=200, text="{}", headers=None):
         self.status = status
-        self._text = text
+        self.content = _CtxContent(text.encode("utf-8"))
+        self.headers = FakeHeaders(headers)
 
     async def __aenter__(self):
         return self
@@ -62,16 +74,15 @@ class _CtxResp:
     async def __aexit__(self, *args):
         return False
 
-    async def text(self, encoding=None, errors=None):
-        return self._text
-
 
 class _CtxSession:
     def __init__(self, responses):
         self._responses = responses  # list of _CtxResp（按调用次序出队）
+        self.calls: list[dict] = []
 
     def request(self, method, url, data=None, **kwargs):
         # aiohttp 的 session.request 返回异步上下文管理器（不是协程）
+        self.calls.append({"method": method, "url": url, "data": data, **kwargs})
         return self._responses.pop(0)
 
 

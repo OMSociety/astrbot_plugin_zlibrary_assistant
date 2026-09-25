@@ -8,7 +8,7 @@
 
 **Z-Library book search & download assistant** — book search · one-click download · account pool rotation · HTML card results · quota management
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
@@ -96,7 +96,7 @@ Optionally, the plugin can reach the Z-Library onion E-API through Tor while kee
 
 - `zlib_search_books`: search books
 - `zlib_download_book`: download by search-result id
-- `zlib_get_status`: check accounts and quota
+- `zlib_get_status`: check accounts and quota (admin sessions only)
 
 Network requests enter Tor via SOCKS5, and `.onion` DNS resolution happens on the Tor side. The plugin provides no arbitrary-URL browsing tool, so a prompt injection cannot turn the bot into an open proxy.
 
@@ -246,7 +246,7 @@ Downloads a book by its search-result id and saves it locally. **Only called whe
 | `book_id` | int | **Required**, book id (from the numbered list returned by zlib_search_books) |
 
 ### zlib_get_status
-Queries the login status and remaining daily download quota of each account in the pool.
+Queries the login status and remaining daily download quota of each account in the pool. **Admin sessions only** (the result contains account-pool internals).
 
 | Parameter | Type | Description |
 |------|------|------|

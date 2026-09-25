@@ -13,12 +13,34 @@ from pydantic.dataclasses import dataclass
 
 from ..zlib_client import ZlibClient
 
+# 非管理员看到的固定短语：账号池状态含账号邮箱与登录失败详情，只对管理员可见
+_ADMIN_ONLY = "账号状态仅管理员可查。"
+
+
+def _is_admin_context(context: ContextWrapper[AstrAgentContext]) -> bool:
+    """判定本次工具调用的发起者是否为 AstrBot 管理员。
+
+    AstrBot 侧的无参调用路径（如 cron/后台任务）不带 event，
+    AstrAgentContext.event 可能为 None，因此逐层取属性并兜底为 False。
+    """
+    event = getattr(getattr(context, "context", None), "event", None)
+    if event is None:
+        return False
+    is_admin = getattr(event, "is_admin", None)
+    if not callable(is_admin):
+        return False
+    try:
+        return bool(is_admin())
+    except Exception:  # noqa: BLE001 - 判定失败一律按非管理员处理
+        return False
+
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class ZlibGetStatusTool(FunctionTool[AstrAgentContext]):
     name: str = "zlib_get_status"
     description: str = (
         "查询 Z-Library 账号池状态：各账号登录是否正常、今日已用/剩余下载额度。"
+        "仅管理员会话可用。"
         "当用户询问下载次数、额度、账号状态，或下载前想确认额度时调用。"
     )
     parameters: dict = Field(
@@ -32,6 +54,8 @@ class ZlibGetStatusTool(FunctionTool[AstrAgentContext]):
     async def call(
         self, context: ContextWrapper[AstrAgentContext], **kwargs: Any
     ) -> ToolExecResult:
+        if not _is_admin_context(context):
+            return _ADMIN_ONLY
         if self.client is None:
             return "插件客户端未初始化，请检查插件配置"
 

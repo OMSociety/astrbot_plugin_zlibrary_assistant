@@ -8,7 +8,7 @@
 
 **Z-Library 書籍検索・ダウンロードアシスタント** —— 書籍検索 · ワンクリックダウンロード · アカウントプールローテーション · HTML カード結果 · クォータ管理
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
@@ -96,7 +96,7 @@ WebUI のプラグイン設定ページで `accounts` にアカウントを 1 �
 
 - `zlib_search_books`：書籍を検索
 - `zlib_download_book`：検索結果の id でダウンロード
-- `zlib_get_status`：アカウントとクォータを確認
+- `zlib_get_status`：アカウントとクォータを確認（管理者セッションのみ）
 
 ネットワークリクエストは SOCKS5 経由で Tor に入り、`.onion` の DNS 解決は Tor 側で行われます。プラグインは任意の URL を閲覧するツールを提供しないため、プロンプトインジェクションによって Bot がオープンプロキシ化されることはありません。
 
@@ -246,7 +246,7 @@ WebUI の設定パネルで入力するか、以下の構造を参考にして�
 | `book_id` | int | **必須**。書籍の id（zlib_search_books が返す番号付きリストの番号） |
 
 ### zlib_get_status
-アカウントプール内の各アカウントのログイン状態と今日の残りダウンロードクォータを照会します。
+アカウントプール内の各アカウントのログイン状態と今日の残りダウンロードクォータを照会します。**管理者セッションのみ**（結果にアカウントプールの内部情報が含まれるため）。
 
 | パラメータ | 型 | 説明 |
 |------|------|------|

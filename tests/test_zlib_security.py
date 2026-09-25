@@ -121,11 +121,25 @@ class _FakeContent:
         return self._body
 
 
+class _FakeTransport:
+    def __init__(self, peer):
+        self._peer = peer
+
+    def get_extra_info(self, name):
+        return self._peer if name == "peername" else None
+
+
+class _FakeConnection:
+    def __init__(self, peer):
+        self.transport = _FakeTransport(peer)
+
+
 class _FakeResponse:
-    def __init__(self, status=200, headers=None, body=b""):
+    def __init__(self, status=200, headers=None, body=b"", peer=("93.184.216.34", 443)):
         self.status = status
         self.headers = headers or {}
         self.content = _FakeContent(body)
+        self.connection = _FakeConnection(peer)
         self.released = False
 
     async def release(self):
@@ -185,6 +199,106 @@ class TestGuardedGet:
         assert resp.status == 200
         assert resp.released is False  # 交给调用方关闭
 
+    def test_rejects_private_peer(self, monkeypatch):
+        """DNS 校验与实际连接分别解析：真实对端 IP 是内网即拒绝（TOCTOU/rebinding）"""
+        routes = {
+            "https://8.8.8.8/f.jpg": _FakeResponse(
+                200, body=b"img", peer=("192.168.1.10", 443)
+            )
+        }
+        client = _make_client(monkeypatch, _FakeSession(routes))
+        resp, err = asyncio.run(
+            client._guarded_get("https://8.8.8.8/f.jpg", timeout_total=8)
+        )
+        assert resp is None
+        assert "对端" in err
+
+    def test_released_connection_is_not_rejected(self, monkeypatch):
+        """取不到对端时不得拒绝。
+
+        aiohttp 在响应体读完后就释放连接（ClientResponse.connection 变 None），
+        小响应（单 TCP 段）几乎必然命中；此时由上一层 URL 校验承担，判定退化为
+        "拿到且是私网才拒绝"，否则直连部署的正常响应会被整体误杀。
+        """
+        resp_obj = _FakeResponse(200, body=b"img")
+        resp_obj.connection = None
+        client = _make_client(monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj}))
+        resp, err = asyncio.run(
+            client._guarded_get("https://8.8.8.8/f.jpg", timeout_total=8)
+        )
+        assert err == ""
+        assert resp is not None
+        assert resp.status == 200
+
+    def test_released_connection_uses_recorded_peer(self, monkeypatch):
+        """连接已释放但有建连期记录：记录下来的是私网就必须拒绝"""
+        resp_obj = _FakeResponse(200, body=b"img")
+        resp_obj.connection = None
+        client = _make_client(monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj}))
+        client._peers["8.8.8.8"] = "10.0.0.7"
+        resp, err = asyncio.run(
+            client._guarded_get("https://8.8.8.8/f.jpg", timeout_total=8)
+        )
+        assert resp is None
+        assert "对端" in err
+
+    def test_recorded_public_peer_passes(self, monkeypatch):
+        resp_obj = _FakeResponse(200, body=b"img")
+        resp_obj.connection = None
+        client = _make_client(monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj}))
+        client._peers["8.8.8.8"] = "93.184.216.34"
+        resp, err = asyncio.run(
+            client._guarded_get("https://8.8.8.8/f.jpg", timeout_total=8)
+        )
+        assert err == ""
+        assert resp.status == 200
+
+    def test_loopback_peer_releases_response(self, monkeypatch):
+        resp_obj = _FakeResponse(200, body=b"img", peer=("127.0.0.1", 80))
+        client = _make_client(monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj}))
+        asyncio.run(client._guarded_get("https://8.8.8.8/f.jpg", timeout_total=8))
+        assert resp_obj.released is True
+
+    def test_peer_check_skipped_for_http_proxy(self, monkeypatch):
+        """配了代理时 TCP 对端必然是代理本身，按内网拒绝会误杀所有正常请求"""
+        routes = {
+            "https://8.8.8.8/f.jpg": _FakeResponse(
+                200, body=b"img", peer=("127.0.0.1", 7897)
+            )
+        }
+        session = _FakeSession(routes)
+        client = ZlibClient(
+            accounts=[], domain="z-library.sk", proxy="http://127.0.0.1:7897"
+        )
+
+        async def fake_get_session():
+            return session
+
+        monkeypatch.setattr(client, "_get_session", fake_get_session)
+        resp, err = asyncio.run(
+            client._guarded_get("https://8.8.8.8/f.jpg", timeout_total=8)
+        )
+        assert err == ""
+        assert resp.status == 200
+
+    def test_peer_check_skipped_for_socks_onion(self, monkeypatch):
+        """Tor 场景对端是本地 SOCKS 代理、目标由 onion 出口建立，无从核验"""
+        onion_host = "a" * 56 + ".onion"
+        onion_url = f"http://{onion_host}/cover.jpg"
+        resp_obj = _FakeResponse(200, body=b"img", peer=("127.0.0.1", 9050))
+        session = _FakeSession({onion_url: resp_obj})
+        client = ZlibClient(
+            accounts=[], domain=onion_host, proxy="socks5://127.0.0.1:9050"
+        )
+
+        async def fake_get_session():
+            return session
+
+        monkeypatch.setattr(client, "_get_session", fake_get_session)
+        resp, err = asyncio.run(client._guarded_get(onion_url, timeout_total=8))
+        assert err == ""
+        assert resp.status == 200
+
     def test_follows_redirect_to_public(self, monkeypatch):
         routes = {
             "https://8.8.8.8/f.jpg": _FakeResponse(
@@ -232,12 +346,16 @@ class TestGuardedGet:
         assert "安全校验" in err
 
     def test_exceeds_max_hops(self, monkeypatch):
-        # 4 台公网主机互相重定向，超过 3 跳上限
+        # 多台公网主机互相重定向，超过守链跳数上限
+        from astrbot_plugin_zlibrary_assistant.zlib_client import (
+            _MAX_GUARDED_REDIRECT_HOPS,
+        )
+
         routes = {
             f"https://8.8.8.{i}/jump": _FakeResponse(
                 302, headers={"Location": f"https://8.8.8.{i + 1}/jump"}
             )
-            for i in range(4)
+            for i in range(_MAX_GUARDED_REDIRECT_HOPS + 1)
         }
         session = _FakeSession(routes)
         client = _make_client(monkeypatch, session)
@@ -245,8 +363,9 @@ class TestGuardedGet:
             client._guarded_get("https://8.8.8.0/jump", timeout_total=8)
         )
         assert resp is None
-        assert "重定向超过 3 跳" in err
-        assert len(session.requested) == 4  # 1 次初始请求 + 3 跳
+        assert f"重定向超过 {_MAX_GUARDED_REDIRECT_HOPS} 跳" in err
+        # 1 次初始请求 + _MAX_GUARDED_REDIRECT_HOPS 跳
+        assert len(session.requested) == _MAX_GUARDED_REDIRECT_HOPS + 1
 
     def test_redirect_missing_location(self, monkeypatch):
         routes = {"https://8.8.8.8/f.jpg": _FakeResponse(302)}

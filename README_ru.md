@@ -8,7 +8,7 @@
 
 **Помощник для поиска и скачивания книг Z-Library** — поиск книг · скачивание в один клик · ротация пула аккаунтов · HTML-карточки результатов · контроль квот
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
@@ -96,7 +96,7 @@ AstrBot WebUI → Маркетплейс плагинов → установит
 
 - `zlib_search_books`: поиск книг
 - `zlib_download_book`: скачивание по id из результатов поиска
-- `zlib_get_status`: состояние аккаунтов и квоты
+- `zlib_get_status`: состояние аккаунтов и квоты (только сессии администратора)
 
 Сетевые запросы идут в Tor через SOCKS5, а DNS-разрешение `.onion` выполняется на стороне Tor. Плагин не предоставляет инструмент для произвольного просмотра URL, чтобы из-за prompt-инъекции бот не превратился в открытый прокси.
 
@@ -246,7 +246,7 @@ python -m pytest -q
 | `book_id` | int | **Обязательно**, id книги (из нумерованного списка, возвращённого zlib_search_books) |
 
 ### zlib_get_status
-Запрашивает состояние авторизации и остаток дневной квоты скачиваний по каждому аккаунту пула.
+Запрашивает состояние авторизации и остаток дневной квоты скачиваний по каждому аккаунту пула. **Только сессии администратора** (результат содержит внутренние данные пула аккаунтов).
 
 | Параметр | Тип | Описание |
 |------|------|------|

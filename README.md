@@ -8,7 +8,7 @@
 
 **Z-Library 图书搜索与下载助手** —— 图书搜索 · 一键下载 · 账号池轮换 · HTML 卡片结果 · 额度管控
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
@@ -98,7 +98,7 @@ AstrBot WebUI → 插件市场 → 通过 GitHub 安装 `astrbot_plugin_zlibrary
 
 - `zlib_search_books`：搜索图书
 - `zlib_download_book`：按搜索结果 id 下载
-- `zlib_get_status`：查看账号和额度
+- `zlib_get_status`：查看账号和额度（仅管理员会话）
 
 网络请求通过 SOCKS5 进入 Tor，`.onion` DNS 解析在 Tor 端完成。插件不提供任意 URL 浏览工具，避免 Bot 被提示注入后变成开放代理。
 
@@ -248,7 +248,7 @@ python -m pytest -q
 | `book_id` | int | **必填**，书籍 id（来自 zlib_search_books 返回的编号列表） |
 
 ### zlib_get_status
-查询账号池各账号登录状态与今日剩余下载额度。
+查询账号池各账号登录状态与今日剩余下载额度。**仅管理员会话可调用**（结果含账号池内部信息）。
 
 | 参数 | 类型 | 说明 |
 |------|------|------|

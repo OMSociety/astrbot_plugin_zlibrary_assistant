@@ -8,6 +8,7 @@ AstrBot 的 send_message_to_user 在 Computer Use 本地运行时（computer_use
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 import aiofiles
@@ -20,6 +21,10 @@ from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 
 from ..zlib_client import ZlibClient, ZlibError
+
+# 下载目录保留期：书籍文件只增不减会把磁盘吃满（书籍常在数十 MB 量级），
+# 超过保留期的文件在每次成功下载后清理；不做成配置项以免扩散配置面
+_DOWNLOAD_RETENTION_DAYS = 7
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -52,6 +57,25 @@ class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
         os.makedirs(d, exist_ok=True)
         return d
 
+    def _purge_expired(self) -> None:
+        """删除下载目录中超过保留期的旧文件（按 mtime）。
+
+        清理是维护动作，与本次下载结果无关：任何失败只记 warning，
+        绝不改变本次下载的成败与返回值。
+        """
+        cutoff = time.time() - _DOWNLOAD_RETENTION_DAYS * 86400
+        d = self._download_dir()
+        try:
+            for name in os.listdir(d):
+                path = os.path.join(d, name)
+                try:
+                    if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                        os.remove(path)
+                except OSError as e:
+                    logger.warning(f"清理过期下载文件失败 {name}: {e}")
+        except OSError as e:
+            logger.warning(f"清理过期下载文件失败: {e}")
+
     async def call(
         self, context: ContextWrapper[AstrAgentContext], **kwargs: Any
     ) -> ToolExecResult:
@@ -70,12 +94,21 @@ class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
 
         # 保存文件到 AstrBot 数据目录
         try:
-            out_path = os.path.join(self._download_dir(), filename)
+            base = os.path.realpath(self._download_dir())
+            out_path = os.path.join(base, filename)
+            # 文件名来自远端 JSON（description/extension），下载工具又对会话开放，
+            # 写盘前必须确认落点仍在下载目录内：越界即拒绝，且不回显路径细节
+            real = os.path.realpath(out_path)
+            if real != base and not real.startswith(base + os.sep):
+                logger.warning("下载文件名越出下载目录，已拒绝保存")
+                return "下载失败：文件名不合法"
             async with aiofiles.open(out_path, "wb") as f:
                 await f.write(content)
         except OSError as e:
             logger.error(f"保存下载文件失败: {e}")
             return f"下载成功但保存文件失败：{e}"
+
+        self._purge_expired()
 
         left = account.downloads_left
         return (
@@ -83,7 +116,7 @@ class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
             f"- 书名：{filename}\n"
             f"- 大小：{len(content) / 1024 / 1024:.1f} MB\n"
             f"- 保存路径：{out_path}\n"
-            f"- 使用账号：{account.name}（今日剩余额度 {left} 次）\n"
+            f"- 今日剩余额度 {left} 次\n"
             f"请用 send_message_to_user 发送文件给用户："
             f'{{"type": "file", "path": "{out_path}"}}（绝对路径）。'
         )

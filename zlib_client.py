@@ -20,6 +20,7 @@ import io
 import json
 import os
 import re
+import warnings
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
@@ -31,7 +32,7 @@ from astrbot.api import logger
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from PIL import Image
 
-from .zlib_security import is_safe_public_url
+from .zlib_security import is_private_ip, is_safe_public_url
 
 # 各端点（基础 URL 由配置提供；onion 通常使用 http://）
 EP_LOGIN = "/eapi/user/login"
@@ -42,9 +43,25 @@ EP_FILE = "/eapi/book/{book_id}/{hash_id}/file"
 # 书籍缓存上限（按写入顺序淘汰最旧条目），防止长期运行无限膨胀
 _MAX_BOOK_CACHE = 500
 
-# 重定向不自动跟随（防公网 302 跳内网的 SSRF 放大），手动逐跳校验
+# 重定向不自动跟随（防公网 302 跳内网的 SSRF 放大），手动逐跳校验。
+# 两条路径的跳数上限分开：守链跟的是远端响应给出的任意 URL，每跳都要过
+# URL 校验与对端 IP 核验，深度多一跳就多放大一次"远端可控跳转"；API 通道
+# 跟的是配置域名内的同源跳转（跨主机直接拒），可以放宽到防护握手所需的深度。
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
-_MAX_REDIRECT_HOPS = 3
+_MAX_GUARDED_REDIRECT_HOPS = 3
+_MAX_API_REDIRECT_HOPS = 5
+
+# E-API JSON 响应体读取上限：业务响应是 KB 级，上限防被投毒/劫持的端点返回
+# 无限流，把插件内存吃光
+_MAX_API_BYTES = 8 * 1024 * 1024
+
+# 封面解码像素预算：PIL 解码不可信字节时按声明的宽高分配内存，一张几十 KB 的
+# PNG 可以把 header 声明成几万 × 几万，解码即 OOM。同时开启 warnings->error，
+# 让 PIL 自身的 DecompressionBomb 阈值成为第二道闸
+_MAX_COVER_PIXELS = 40_000_000
+
+# Set-Cookie 名称的合法字符（RFC 6265 token）：用来区分 `name=value` 与属性
+_COOKIE_NAME_RE = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
 # 默认请求头（模拟浏览器，降低被风控概率）。
 # Content-Type 不放这里：POST 才有意义，GET 带表单类型头不严谨
@@ -175,22 +192,81 @@ def _guess_image_mime(content: bytes) -> str:
 def _resize_cover(content: bytes, max_width: int = 168) -> bytes:
     """缩放封面并转 JPEG，压缩 base64 体积（卡片封面显示宽仅 84px，2x 清晰度 168px 足够）。
 
-    压缩失败返回原图（调用方按魔数判断类型）。
+    content 是 Z-Library 封面 CDN 返回的不可信字节（体积上限由调用方限定，
+    见 fetch_cover_base64）。解码前先查像素预算，并让 PIL 的
+    DecompressionBombWarning 升级为异常：按 header 声明的宽高分配内存的
+    解码方式是内存放大器，超预算即放弃。
+
+    无法解码或超预算时返回 b""（调用方按占位降级）。绝不回传原始字节：
+    原图可能是被中间人替换的任意内容，回传等于把它 base64 内嵌进发给用户的模板。
     """
     try:
-        img = Image.open(io.BytesIO(content))
-        if img.width > max_width:
-            ratio = max_width / img.width
-            img = img.resize(
-                (max_width, max(1, int(img.height * ratio))), Image.LANCZOS
-            )
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=80)
-        return buf.getvalue()
-    except Exception:  # noqa: BLE001 - 压缩失败退化为原图
-        return content
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            img = Image.open(io.BytesIO(content))
+            if img.width * img.height > _MAX_COVER_PIXELS:
+                return b""
+            if img.width > max_width:
+                ratio = max_width / img.width
+                img = img.resize(
+                    (max_width, max(1, int(img.height * ratio))), Image.LANCZOS
+                )
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=80)
+            return buf.getvalue()
+    except Exception:  # noqa: BLE001 - 解码/超预算失败一律降级为占位
+        return b""
+
+
+def _is_same_origin(target: str, base: str) -> bool:
+    """判断重定向目标是否与配置的接口地址同源。
+
+    同源口径是 scheme + 主机 + 端口完全相同（主机名大小写不敏感，
+    显式默认端口 `:443` / `:80` 与其省略写法等价）。
+    跨主机跳转会带着账号 cookies 去往未经校验的主机；跨 scheme 跳转
+    （https → http）是明文降级——两者都拒绝。
+    """
+    target_parts = urlparse(target)
+    base_parts = urlparse(base)
+    return (
+        target_parts.scheme in ("http", "https")
+        and target_parts.scheme == base_parts.scheme
+        and (target_parts.hostname or "").lower() == (base_parts.hostname or "").lower()
+        and _effective_port(target_parts) == _effective_port(base_parts)
+    )
+
+
+def _merge_set_cookies(cookies: dict, set_cookie_headers: list[str]) -> dict:
+    """把重定向响应里的 Set-Cookie 并进请求 cookies（名称 -> 值）。
+
+    只取名称与值：Domain / Path / Secure 等属性对本客户端无意义（请求只发往
+    配置的同一主机），而"带着防护 cookie 重试"才是握手放行的必要条件。
+
+    按 RFC 6265 只认整条里的**第一个** `name=value`，后面全是属性——否则
+    `a=b; Priority=High` 这种响应会把 `Priority` 也当成一个 cookie。
+    """
+    merged = dict(cookies)
+    for header in set_cookie_headers:
+        pair = header.split(";", 1)[0]
+        name, sep, value = pair.partition("=")
+        name = name.strip()
+        if not sep or not name or not _COOKIE_NAME_RE.fullmatch(name):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] == '"':
+            value = value[1:-1]
+        if value:
+            merged[name] = value
+    return merged
+
+
+def _effective_port(parts) -> int | None:
+    """取 URL 的有效端口：显式端口优先，否则用 scheme 的默认端口。"""
+    if parts.port is not None:
+        return parts.port
+    return {"http": 80, "https": 443}.get(parts.scheme)
 
 
 def _normalize_base_url(value: str) -> str:
@@ -258,6 +334,10 @@ class ZlibClient:
             )
         self._session: aiohttp.ClientSession | None = None
         self._session_lock = asyncio.Lock()
+        # 建连期捕获的对端 IP：host -> peername。aiohttp 在响应体读完后立即释放
+        # 连接（ClientResponse.connection 变 None），此后无从取对端；建连期是唯一
+        # 稳定观测点（keep-alive 复用连接不重新建连，见 _peer_for_get）
+        self._peers: dict[str, str] = {}
         # 登录互斥锁：防止插件更新/重载导致新旧实例并发触发 login_all
         self._login_lock = asyncio.Lock()
         # 搜索结果的书籍缓存：id -> book dict（下载时按 id 取完整信息，含 hash）
@@ -299,6 +379,36 @@ class ZlibClient:
 
     # ---------- 会话管理 ----------
 
+    def _install_peer_capture(self, connector) -> None:
+        """在 connector 上挂建连期对端观测。
+
+        aiohttp 的 TraceConfig 也挂在建连期，但其 `on_connection_create_end`
+        只收到 (session, trace_config_ctx, params)，params 里没有任何连接对象，
+        取不到 transport；因此只能在 connector 的建连方法上包一层。
+        """
+        if getattr(connector, "_zl_peer_capture", False):
+            return
+        inner_create = connector._create_connection
+
+        async def _create_with_peer(req, traces, timeout):
+            proto = await inner_create(req, traces, timeout)
+            try:
+                transport = getattr(proto, "transport", None)
+                peer = (
+                    transport.get_extra_info("peername")
+                    if transport is not None
+                    else None
+                )
+                if peer and peer[0]:
+                    # 按主机记录，不按连接：复用连接不重新建连，无从观测
+                    self._peers[req.url.host] = str(peer[0])
+            except Exception:  # noqa: BLE001 - 观测失败不影响建连
+                pass
+            return proto
+
+        connector._create_connection = _create_with_peer
+        connector._zl_peer_capture = True
+
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             async with self._session_lock:
@@ -311,9 +421,15 @@ class ZlibClient:
                     self._session = aiohttp.ClientSession(
                         timeout=timeout, headers=DEFAULT_HEADERS, connector=connector
                     )
+                    # 直连时建立建连期观测；包代理时 _guarded_get 不对端核验，
+                    # 记录下来的也只是代理地址，不参与判定
+                    if not self._socks_proxy and self._session.connector is not None:
+                        self._peers.clear()
+                        self._install_peer_capture(self._session.connector)
         return self._session
 
     async def close(self):
+        self._peers.clear()
         if self._session and not self._session.closed:
             await self._session.close()
 
@@ -353,10 +469,21 @@ class ZlibClient:
         data: dict | None = None,
         params: dict | None = None,
     ) -> dict:
-        """发请求并解析 JSON；对常见异常做分类。"""
+        """发请求并解析 JSON；对常见异常做分类。
+
+        3xx 手动逐跳跟随，但只允许跳回同一个源（scheme + 主机 + 端口）：
+        Z-Library 的前置防护（DiamWall）会先回一个自指 307 种下 cookie，
+        客户端带着 cookie 重发才放行，因此不能一律拒绝 3xx；而跨主机跳转
+        会把带账号 cookies 的请求送去未经校验的主机，必须拒绝。
+        """
         session = await self._get_session()
-        url = self._base_url() + path
-        kwargs: dict = {"ssl": False, **self._proxy_kwargs()}
+        base_url = self._base_url()
+        url = base_url + path
+        # 不关 TLS 校验：这条通道承载登录 POST（email+password）与长效 remix
+        # userid/userkey——它们是账号的等价凭据。关掉校验等于把凭据交给链路上
+        # 任何中间人；aiohttp 默认（校验证书链与主机名）即为正确行为。
+        # onion 模式是明文 http，不涉及 TLS，由 SOCKS 代理承担链路。
+        kwargs: dict = {**self._proxy_kwargs()}
         if account is not None:
             kwargs["cookies"] = self._cookies(account)
         if params:
@@ -368,28 +495,81 @@ class ZlibClient:
         if headers:
             kwargs["headers"] = headers
 
-        try:
-            async with session.request(method, url, data=data, **kwargs) as resp:
-                # 强制 UTF-8 解码：Z-Library 响应头常缺失 charset，aiohttp 会误判为 latin-1
-                text = await resp.text(encoding="utf-8", errors="replace")
-        except (
-            aiohttp.ClientConnectorError,
-            aiohttp.ServerTimeoutError,
-            asyncio.TimeoutError,
-        ) as e:
-            raise ZlibError(
-                "network_error",
-                "网络异常（连接失败或超时）",
-                f"{type(e).__name__}: {e}",
-            )
-        except aiohttp.ClientError as e:
-            raise ZlibError("network_error", "网络请求失败", str(e))
+        # 每次重发沿用同一份 params / headers / cookies。
+        # 重定向响应里的 Set-Cookie 必须自己收进 cookies 再重发：aiohttp 的
+        # cookie jar 本身会存也会带（client.py 的 update_cookies_from_headers），
+        # 但**只要调用方显式传了 cookies=，aiohttp 就不再合并 jar**——而本客户端
+        # 每次都显式传（账号 remix 凭据），于是 DiamWall 的"自指 307 + 种 cookie +
+        # 带 cookie 重试"握手会卡在跳数上限。必须手工把 Set-Cookie 并进该字典。
+        hop = 0
+        while True:
+            try:
+                async with session.request(
+                    method, url, data=data, allow_redirects=False, **kwargs
+                ) as resp:
+                    # 强制 UTF-8 解码：Z-Library 响应头常缺失 charset，aiohttp 会误判为 latin-1。
+                    # 先按硬上限读字节再解码，避免异常端点用无限响应体撑爆内存。
+                    raw = await resp.content.read(_MAX_API_BYTES + 1)
+                    if len(raw) > _MAX_API_BYTES:
+                        raise ZlibError(
+                            "domain_invalid",
+                            f"当前域名 {self.domain} 的响应超过 {_MAX_API_BYTES // 1024 // 1024} MiB 上限",
+                        )
+                    text = (
+                        raw.decode("utf-8", errors="replace")
+                        if isinstance(raw, bytes)
+                        else raw
+                    )
+                    status = resp.status
+                    location = (
+                        resp.headers.get("Location")
+                        if status in _REDIRECT_STATUSES
+                        else None
+                    )
+                    set_cookies = list(resp.headers.getall("Set-Cookie", []))
+            except (
+                aiohttp.ClientConnectorError,
+                aiohttp.ServerTimeoutError,
+                asyncio.TimeoutError,
+            ) as e:
+                raise ZlibError(
+                    "network_error",
+                    "网络异常（连接失败或超时）",
+                    f"{type(e).__name__}: {e}",
+                )
+            except aiohttp.ClientError as e:
+                raise ZlibError("network_error", "网络请求失败", str(e))
+
+            if status not in _REDIRECT_STATUSES:
+                break
+            if not location:
+                raise ZlibError(
+                    "domain_invalid",
+                    f"接口重定向缺少 Location（HTTP {status}）",
+                    text[:200],
+                )
+            target = urljoin(url, location)
+            if not _is_same_origin(target, base_url):
+                raise ZlibError(
+                    "domain_invalid",
+                    f"接口重定向到了配置域名之外（HTTP {status}）",
+                    target[:200],
+                )
+            if hop >= _MAX_API_REDIRECT_HOPS:
+                raise ZlibError(
+                    "domain_invalid",
+                    f"接口重定向次数过多（超过 {_MAX_API_REDIRECT_HOPS} 跳）",
+                )
+            hop += 1
+            url = target
+            if set_cookies and isinstance(kwargs.get("cookies"), dict):
+                kwargs["cookies"] = _merge_set_cookies(kwargs["cookies"], set_cookies)
 
         # 域名失效：CF 挑战页 / 非 JSON
-        if resp.status == 404 or resp.status >= 500:
+        if status == 404 or status >= 500:
             raise ZlibError(
                 "domain_invalid",
-                f"当前域名 {self.domain} 可能已失效（HTTP {resp.status}）",
+                f"当前域名 {self.domain} 可能已失效（HTTP {status}）",
                 text[:200],
             )
 
@@ -587,8 +767,42 @@ class ZlibClient:
         if not content:
             return "", err
         compressed = _resize_cover(content)
+        if not compressed:
+            # 解码失败或超出像素预算：返回空 URI 让模板显示占位，
+            # 既不回传原图也不产出空的 data URI（那会被当成有效图片）
+            return "", "封面解码失败或超出像素预算"
         mime = _guess_image_mime(compressed)
         return f"data:{mime};base64,{base64.b64encode(compressed).decode('ascii')}", ""
+
+    @staticmethod
+    def _peer_ip(resp: aiohttp.ClientResponse) -> str | None:
+        """从响应对象取对端（TCP peer）IP；取不到返回 None。
+
+        resp.connection 在响应体读完（aiohttp 随即释放连接）或响应由测试桩
+        构造时为 None，transport 也可能不支持 peername，故整段兜底。
+        """
+        try:
+            connection = getattr(resp, "connection", None)
+            if connection is None:
+                return None
+            peer = connection.transport.get_extra_info("peername")
+            if not peer or not peer[0]:
+                return None
+            return str(peer[0])
+        except Exception:  # noqa: BLE001 - 取不到对端信息
+            return None
+
+    def _peer_for_get(self, resp: aiohttp.ClientResponse, url: str) -> str | None:
+        """核验用的对端 IP：优先活连接，退回建连期记录。
+
+        活连接最准确；响应已读完时连接已被释放，则用建连期按主机记录的
+        对端（连接池按主机键控，复用连接必然是同一主机此前建过的连接）。
+        """
+        peer = self._peer_ip(resp)
+        if peer:
+            return peer
+        host = urlparse(url).hostname or ""
+        return self._peers.get(host)
 
     async def _guarded_get(
         self,
@@ -606,7 +820,7 @@ class ZlibClient:
         """
         session = await self._get_session()
         current = url
-        for hop in range(_MAX_REDIRECT_HOPS + 1):
+        for hop in range(_MAX_GUARDED_REDIRECT_HOPS + 1):
             # getaddrinfo 是阻塞调用，放线程池避免卡事件循环
             ok, reason = await asyncio.to_thread(
                 is_safe_public_url, current, allow_onion=self._socks_proxy
@@ -618,9 +832,8 @@ class ZlibClient:
                     current,
                     allow_redirects=False,
                     **self._proxy_kwargs(),
-                    # ssl=False 是该站既有取舍（Z-Library 证书链问题）；
-                    # 明文/降级不改变校验目标主机，风险由逐跳 IP 黑名单兜底
-                    ssl=False,
+                    # 不关 TLS 校验：明文或降级连接会让链路上的中间人可替换
+                    # 封面/书籍字节（内容会内嵌进发给用户的模板或落盘）
                     headers=headers,
                     cookies=cookies,
                     timeout=aiohttp.ClientTimeout(total=timeout_total),
@@ -633,11 +846,31 @@ class ZlibClient:
                 return None, f"网络异常: {type(e).__name__}: {e}"
             except aiohttp.ClientError as e:
                 return None, f"{type(e).__name__}: {e}"
+            # is_safe_public_url 只证明"此刻该域名解析到的 IP 都是公网"，aiohttp
+            # 随后会自行重新解析——两次解析之间的 DNS 应答可变（rebinding）。
+            # 因此再核验真实建连的对端 IP，而不是只信任解析结果。
+            #
+            # 拿不到对端时不拒绝：响应体读完（常见的单段小响应）aiohttp 就已释放
+            # 连接，ClientResponse.connection 变 None 是常态而非异常信号；此时由
+            # 上一层 URL 校验承担，判定退化为"拿到且是私网才拒绝"。
+            #
+            # 配置了代理时整段不适用：此时 TCP 对端是代理本身（通常是 127.0.0.1），
+            # 按内网拒绝会把所有正常请求误杀。代价是这一层在代理分支失效——代理
+            # 侧的域名解析与 is_safe_public_url 的本机解析可以不一致（双解析器 /
+            # rebinding），该分支只能依赖 URL 校验与代理自身。
+            if self.proxy is None:
+                peer = self._peer_for_get(resp, current)
+                if peer is not None and is_private_ip(peer):
+                    try:
+                        await resp.release()
+                    except Exception as e:  # noqa: BLE001 - 释放失败不影响拒绝判定
+                        logger.debug(f"释放未通过校验的响应失败: {e}")
+                    return None, f"实际连接的对端不是公网地址: {current[:200]}"
             if resp.status not in _REDIRECT_STATUSES:
                 return resp, ""
-            if hop == _MAX_REDIRECT_HOPS:
+            if hop == _MAX_GUARDED_REDIRECT_HOPS:
                 await resp.release()
-                return None, f"重定向超过 {_MAX_REDIRECT_HOPS} 跳"
+                return None, f"重定向超过 {_MAX_GUARDED_REDIRECT_HOPS} 跳"
             location = resp.headers.get("Location")
             await resp.release()
             if not location:
@@ -712,13 +945,19 @@ class ZlibClient:
             )
         file_info = resp["file"]
         dl = file_info["downloadLink"]
-        ext = file_info.get("extension", "bin")
+        # extension 是远端 JSON 字段，可能带路径分隔符（"pdf/../../evil"）；
+        # _sanitize_filename 只清洗 description 段，ext 是清洗之后才拼上的，
+        # 因此这里独立做字符白名单（只留字母数字，限长 8）
+        ext = re.sub(r"[^A-Za-z0-9]", "", str(file_info.get("extension") or ""))[:8]
+        ext = ext or "bin"
         description = file_info.get("description", "")
         # 描述形如 "书名-作者 (z-library.sk...)"，清理成文件名
         filename = description.split(" (")[0].strip() or f"book_{book_id}"
         filename = _sanitize_filename(filename)
         if not filename.endswith("." + ext):
             filename = f"{filename}.{ext}"
+        # 拼上 ext 后再过一遍：文件名是写盘入口，任何一段都不能带分隔符或 ..
+        filename = _sanitize_filename(filename)
         return dl, filename, ext
 
     async def download(self, book: dict) -> tuple[Account, str, bytes]:
