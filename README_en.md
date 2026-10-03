@@ -83,7 +83,7 @@ Just add one account under `accounts` on the plugin configuration page in the We
 
 After saving, restart AstrBot and you can search and download books directly in the conversation.
 
-> **Note:** Servers in mainland China need a proxy in `proxy` (e.g. `http://127.0.0.1:7897`); servers outside China can leave it empty. If you want to use a stable onion entrance, see the [Tor/onion Deployment](#toronion-deployment).
+> **Note**: Servers in mainland China need a proxy in `proxy` (e.g. `http://127.0.0.1:7897`); servers outside China can leave it empty. If you want to use a stable onion entrance, see the [Tor/onion Deployment](#toronion-deployment).
 
 ### Dependencies
 The plugin depends on `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow`; AstrBot handles them automatically when installing the plugin, no extra steps needed.
@@ -325,7 +325,7 @@ Free Z-Library accounts have a limited number of daily downloads (about 10/day).
 2. Fill `remix_userid` and `remix_userkey` in the plugin's `accounts` configuration (leave email/password empty)
 3. The plugin will verify via GET `/eapi/user/profile`, and search/download will work normally
 
-> **Tip:** `remix_userkey` is valid long-term; configure it once and it keeps working.
+> **Tip**: `remix_userkey` is valid long-term; configure it once and it keeps working.
 
 ### Q6: Download completes but the file cannot be sent, with "Sandbox runtime is disabled by configuration"?
 

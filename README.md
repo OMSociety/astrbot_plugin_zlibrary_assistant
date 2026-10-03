@@ -85,7 +85,7 @@ AstrBot WebUI → 插件市场 → 通过 GitHub 安装 `astrbot_plugin_zlibrary
 
 保存后重启 AstrBot，即可在对话中直接搜书、下载。
 
-> **提示：**国内服务器需在 `proxy` 填代理（如 `http://127.0.0.1:7897`），境外服务器可留空。如需使用稳定的 onion 入口，请参阅 [Tor/onion 部署](#toronion-部署)。
+> **提示**：国内服务器需在 `proxy` 填代理（如 `http://127.0.0.1:7897`），境外服务器可留空。如需使用稳定的 onion 入口，请参阅 [Tor/onion 部署](#toronion-部署)。
 
 ### 依赖安装
 插件依赖 `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow`，AstrBot 安装插件时自动处理，无需额外安装。
@@ -327,7 +327,7 @@ Z-Library 免费账号每日下载次数有限（约 10 次/天）。解决：
 2. 在插件配置 `accounts` 中填 `remix_userid` 和 `remix_userkey`（留空 email/password）
 3. 插件将用 GET `/eapi/user/profile` 验证并正常使用搜索/下载
 
-> **提示：**`remix_userkey` 长期有效，配置一次即可长期使用。
+> **提示**：`remix_userkey` 长期有效，配置一次即可长期使用。
 
 ### Q6：下载完成但发不出文件，提示 "Sandbox runtime is disabled by configuration"？
 
