@@ -222,7 +222,9 @@ class TestGuardedGet:
         """
         resp_obj = _FakeResponse(200, body=b"img")
         resp_obj.connection = None
-        client = _make_client(monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj}))
+        client = _make_client(
+            monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj})
+        )
         resp, err = asyncio.run(
             client._guarded_get("https://8.8.8.8/f.jpg", timeout_total=8)
         )
@@ -234,7 +236,9 @@ class TestGuardedGet:
         """连接已释放但有建连期记录：记录下来的是私网就必须拒绝"""
         resp_obj = _FakeResponse(200, body=b"img")
         resp_obj.connection = None
-        client = _make_client(monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj}))
+        client = _make_client(
+            monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj})
+        )
         client._peers["8.8.8.8"] = "10.0.0.7"
         resp, err = asyncio.run(
             client._guarded_get("https://8.8.8.8/f.jpg", timeout_total=8)
@@ -245,7 +249,9 @@ class TestGuardedGet:
     def test_recorded_public_peer_passes(self, monkeypatch):
         resp_obj = _FakeResponse(200, body=b"img")
         resp_obj.connection = None
-        client = _make_client(monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj}))
+        client = _make_client(
+            monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj})
+        )
         client._peers["8.8.8.8"] = "93.184.216.34"
         resp, err = asyncio.run(
             client._guarded_get("https://8.8.8.8/f.jpg", timeout_total=8)
@@ -255,7 +261,9 @@ class TestGuardedGet:
 
     def test_loopback_peer_releases_response(self, monkeypatch):
         resp_obj = _FakeResponse(200, body=b"img", peer=("127.0.0.1", 80))
-        client = _make_client(monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj}))
+        client = _make_client(
+            monkeypatch, _FakeSession({"https://8.8.8.8/f.jpg": resp_obj})
+        )
         asyncio.run(client._guarded_get("https://8.8.8.8/f.jpg", timeout_total=8))
         assert resp_obj.released is True
 

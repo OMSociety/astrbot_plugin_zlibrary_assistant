@@ -46,9 +46,7 @@ class ZLibraryAssistantPlugin(Star):
         self.config = config
         self.client = ZlibClient(
             accounts=_parse_accounts(config),
-            domain=config.get("base_url")
-            or config.get("domain")
-            or "z-library.sk",
+            domain=config.get("base_url") or config.get("domain") or "z-library.sk",
             proxy=config.get("tor_proxy") or config.get("proxy", ""),
             max_download_mb=int(config.get("max_download_mb", 80) or 80),
         )

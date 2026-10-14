@@ -32,11 +32,13 @@ sys.modules.update(
 )
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from astrbot_plugin_zlibrary_assistant.zlib_client import (
+# 导入必须在 sys.path 注入之后：本脚本不依赖完整 AstrBot 安装，
+# 上面的桩模块与路径是导入这些模块的前提。
+from astrbot_plugin_zlibrary_assistant.zlib_client import (  # noqa: E402
     ZlibClient,
     _normalize_base_url,
 )
-from astrbot_plugin_zlibrary_assistant.zlib_security import (
+from astrbot_plugin_zlibrary_assistant.zlib_security import (  # noqa: E402
     is_safe_public_url,
 )
 

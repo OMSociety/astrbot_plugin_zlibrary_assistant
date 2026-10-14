@@ -14,7 +14,6 @@ import time
 import zlib
 
 import pytest
-from astrbot_plugin_zlibrary_assistant import zlib_client as zc
 from astrbot_plugin_zlibrary_assistant.tools import download_tool as dt
 from astrbot_plugin_zlibrary_assistant.tools import search_tool as st
 from astrbot_plugin_zlibrary_assistant.tools import status_tool as stat
@@ -295,7 +294,10 @@ class TestRequestJsonTransport:
         """登录 POST 被防护 307 拦下时，重发必须仍带表单体与 Content-Type"""
         client = _make_client()
         session = _CtxSession(
-            [_CtxResp(307, headers={"Location": "/eapi/user/login"}), _CtxResp(200, "{}")]
+            [
+                _CtxResp(307, headers={"Location": "/eapi/user/login"}),
+                _CtxResp(200, "{}"),
+            ]
         )
         _patch_session(monkeypatch, client, session)
         asyncio.run(
@@ -737,9 +739,7 @@ class TestBase64CoverEntry:
 
     def test_oversized_cover_returns_empty_uri(self, monkeypatch):
         client = _make_client()
-        bomb = _forge_png_size(
-            _png_bytes(1, 1), *TestCoverPixelBudget.BUDGET_BOMB
-        )
+        bomb = _forge_png_size(_png_bytes(1, 1), *TestCoverPixelBudget.BUDGET_BOMB)
         # 先确认这是合法可解码的图（否则"返回空 URI"可能只是因为图坏了）
         assert Image.open(io.BytesIO(bomb)).size == TestCoverPixelBudget.BUDGET_BOMB
 
