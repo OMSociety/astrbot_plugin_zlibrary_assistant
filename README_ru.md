@@ -2,9 +2,7 @@
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="120" alt="ZLibrary Assistant Logo" />
-
-# Ассистент Zlibrary
+<h1><img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="192" alt="ZLibrary Assistant Logo"><br>Ассистент Zlibrary</h1>
 
 **Помощник для поиска и скачивания книг Z-Library** — поиск книг · скачивание в один клик · ротация пула аккаунтов · HTML-карточки результатов · контроль квот
 

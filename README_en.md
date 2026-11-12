@@ -2,9 +2,7 @@
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="120" alt="ZLibrary Assistant Logo" />
-
-# Zlibrary Assistant
+<h1><img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="192" alt="ZLibrary Assistant Logo"><br>Zlibrary Assistant</h1>
 
 **Z-Library book search & download assistant** — book search · one-click download · account pool rotation · HTML card results · quota management
 

@@ -2,9 +2,7 @@
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="120" alt="ZLibrary Assistant Logo" />
-
-# Zlibrary アシスタント
+<h1><img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="192" alt="ZLibrary Assistant Logo"><br>Zlibrary アシスタント</h1>
 
 **Z-Library 書籍検索・ダウンロードアシスタント** —— 書籍検索 · ワンクリックダウンロード · アカウントプールローテーション · HTML カード結果 · クォータ管理
 
