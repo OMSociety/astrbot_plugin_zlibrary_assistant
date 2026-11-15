@@ -29,9 +29,9 @@ from aiohttp_socks import ProxyConnector
 
 # 使用 AstrBot 插件 logger（与插件日志格式一致，避免 loguru record 缺字段）
 from astrbot.api import logger
-from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from PIL import Image
 
+from .zlib_paths import plugin_data_dir
 from .zlib_security import is_private_ip, is_safe_public_url
 
 # 各端点（基础 URL 由配置提供；onion 通常使用 http://）
@@ -348,11 +348,7 @@ class ZlibClient:
     # ---------- 书籍缓存持久化 ----------
 
     def _cache_file(self) -> str:
-        try:
-            base = get_astrbot_data_path()
-        except Exception:  # noqa: BLE001 - 非 AstrBot 环境（如独立测试）时退化到内存缓存
-            base = os.path.join(os.path.expanduser("~"), ".astrbot_zlibrary")
-        return os.path.join(base, "zlibrary_assistant", "book_cache.json")
+        return os.path.join(plugin_data_dir(), "book_cache.json")
 
     def _load_book_cache(self):
         try:

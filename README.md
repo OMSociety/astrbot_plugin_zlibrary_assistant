@@ -6,7 +6,7 @@
 
 **Z-Library 图书搜索与下载助手** —— 图书搜索 · 一键下载 · 账号池轮换 · HTML 卡片结果 · 额度管控
 
-[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/badge/version-1.1.2-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
@@ -268,7 +268,7 @@ Z-Library 安卓客户端内部接口（非官方 E-API）的异步封装：
 ### 工具层（tools/）
 三个 `FunctionTool` 通过 `add_llm_tools` 注册，LLM 在对话中自动识别调用：
 - `search_tool.py` — 搜索 + HTML 卡片渲染（渲染失败自动降级纯文本）
-- `download_tool.py` — 按 id 下载到 `<data>/zlibrary_assistant/books/`，返回绝对路径
+- `download_tool.py` — 按 id 下载到 `<data>/plugin_data/zlibrary_assistant/books/`，返回绝对路径
 - `status_tool.py` — 账号池健康度查询
 
 ### 卡片渲染（templates.py）

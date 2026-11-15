@@ -168,13 +168,17 @@ class TestSearchCacheShallowCopy:
         assert "cover" not in client.book_cache[1]
 
     def test_cache_persisted_entries_survive(self, tmp_path, monkeypatch):
-        """缓存写入磁盘后重启可读（id 转字符串存储）"""
+        """缓存写入插件数据目录后重启可读（id 转字符串存储）"""
         from astrbot_plugin_zlibrary_assistant import zlib_client as zc
+        from astrbot_plugin_zlibrary_assistant import zlib_paths
 
-        monkeypatch.setattr(zc, "get_astrbot_data_path", lambda: str(tmp_path))
+        monkeypatch.setattr(zlib_paths, "get_astrbot_data_path", lambda: str(tmp_path))
         client = _make_client()
         client.book_cache[1] = {"id": 1, "title": "t"}
         client._save_book_cache()
+
+        cache = tmp_path / "plugin_data" / "zlibrary_assistant" / "book_cache.json"
+        assert cache.exists()
 
         client2 = zc.ZlibClient(accounts=[], domain="z-library.sk")
         assert client2.book_cache[1]["title"] == "t"

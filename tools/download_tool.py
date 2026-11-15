@@ -1,6 +1,6 @@
 """zlib_download_book 工具：按 id 下载书籍到 AstrBot 数据目录。
 
-文件保存到 <AstrBot data>/zlibrary_assistant/books/，向 LLM 返回**绝对路径**。
+文件保存到 <AstrBot data>/plugin_data/zlibrary_assistant/books/，向 LLM 返回**绝对路径**。
 AstrBot 的 send_message_to_user 在 Computer Use 本地运行时（computer_use_runtime=local）
 下允许发送本地绝对路径文件（需在 WebUI 启用 Computer Use）。
 """
@@ -16,11 +16,11 @@ from astrbot.api import logger
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
-from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 
 from ..zlib_client import ZlibClient, ZlibError
+from ..zlib_paths import plugin_data_dir
 
 # 下载目录保留期：书籍文件只增不减会把磁盘吃满（书籍常在数十 MB 量级），
 # 超过保留期的文件在每次成功下载后清理；不做成配置项以免扩散配置面
@@ -52,8 +52,7 @@ class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
     client: ZlibClient | None = None
 
     def _download_dir(self) -> str:
-        base = get_astrbot_data_path()
-        d = os.path.join(base, "zlibrary_assistant", "books")
+        d = os.path.join(plugin_data_dir(), "books")
         os.makedirs(d, exist_ok=True)
         return d
 

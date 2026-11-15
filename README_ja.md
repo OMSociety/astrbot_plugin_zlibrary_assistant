@@ -6,7 +6,7 @@
 
 **Z-Library 書籍検索・ダウンロードアシスタント** —— 書籍検索 · ワンクリックダウンロード · アカウントプールローテーション · HTML カード結果 · クォータ管理
 
-[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/badge/version-1.1.2-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
@@ -266,7 +266,7 @@ Z-Library Android クライアントの内部インターフェース（非公�
 ### ツール層（tools/）
 3 つの `FunctionTool` が `add_llm_tools` で登録され、LLM が会話の中で自動認識して呼び出します：
 - `search_tool.py` — 検索 + HTML カードレンダリング（レンダリング失敗時は自動でプレーンテキストにフォールバック）
-- `download_tool.py` — id で `<data>/zlibrary_assistant/books/` へダウンロードし、絶対パスを返す
+- `download_tool.py` — id で `<data>/plugin_data/zlibrary_assistant/books/` へダウンロードし、絶対パスを返す
 - `status_tool.py` — アカウントプールの状態照会
 
 ### カードレンダリング（templates.py）

@@ -6,7 +6,7 @@
 
 **Z-Library book search & download assistant** — book search · one-click download · account pool rotation · HTML card results · quota management
 
-[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/badge/version-1.1.2-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
@@ -266,7 +266,7 @@ An async wrapper around the internal interface of the Z-Library Android client (
 ### Tool layer (tools/)
 Three `FunctionTool`s registered via `add_llm_tools`; the LLM recognizes and calls them automatically in conversation:
 - `search_tool.py` — search + HTML card rendering (automatically falls back to plain text if rendering fails)
-- `download_tool.py` — downloads by id to `<data>/zlibrary_assistant/books/` and returns the absolute path
+- `download_tool.py` — downloads by id to `<data>/plugin_data/zlibrary_assistant/books/` and returns the absolute path
 - `status_tool.py` — account pool health query
 
 ### Card rendering (templates.py)

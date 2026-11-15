@@ -14,17 +14,18 @@ import time
 import zlib
 
 import pytest
+from astrbot_plugin_zlibrary_assistant import zlib_paths
 from astrbot_plugin_zlibrary_assistant.tools import download_tool as dt
 from astrbot_plugin_zlibrary_assistant.tools import search_tool as st
 from astrbot_plugin_zlibrary_assistant.tools import status_tool as stat
 from astrbot_plugin_zlibrary_assistant.tools.status_tool import ZlibGetStatusTool
 from astrbot_plugin_zlibrary_assistant.zlib_client import (
-    Account,
-    ZlibClient,
-    ZlibError,
     _MAX_API_BYTES,
     _MAX_API_REDIRECT_HOPS,
     _MAX_COVER_PIXELS,
+    Account,
+    ZlibClient,
+    ZlibError,
     _is_same_origin,
     _resize_cover,
     _sanitize_filename,
@@ -488,7 +489,7 @@ class TestDownloadPathContainment:
     """下载落点必须留在下载目录内；文件名来自远端 JSON"""
 
     def _tool(self, monkeypatch, tmp_path, filename: str):
-        monkeypatch.setattr(dt, "get_astrbot_data_path", lambda: str(tmp_path))
+        monkeypatch.setattr(zlib_paths, "get_astrbot_data_path", lambda: str(tmp_path))
         account = Account(name="acc1", logged_in=True, downloads_today=1)
 
         async def fake_download(book_id):
@@ -524,7 +525,11 @@ class TestDownloadPathContainment:
         result = asyncio.run(tool.call(None, book_id=1))
         assert "下载完成" in result
         saved = os.path.join(
-            str(tmp_path), "zlibrary_assistant", "books", "Book-Title.pdf"
+            str(tmp_path),
+            "plugin_data",
+            "zlibrary_assistant",
+            "books",
+            "Book-Title.pdf",
         )
         assert os.path.exists(saved)
 
@@ -537,7 +542,9 @@ class TestDownloadPathContainment:
 
     def test_expired_files_purged_after_download(self, monkeypatch, tmp_path):
         tool = self._tool(monkeypatch, tmp_path, "Book-Title.pdf")
-        books_dir = os.path.join(str(tmp_path), "zlibrary_assistant", "books")
+        books_dir = os.path.join(
+            str(tmp_path), "plugin_data", "zlibrary_assistant", "books"
+        )
         os.makedirs(books_dir, exist_ok=True)
         stale = os.path.join(books_dir, "stale.pdf")
         fresh = os.path.join(books_dir, "fresh.pdf")

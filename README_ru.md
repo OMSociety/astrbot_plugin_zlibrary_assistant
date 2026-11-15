@@ -6,7 +6,7 @@
 
 **Помощник для поиска и скачивания книг Z-Library** — поиск книг · скачивание в один клик · ротация пула аккаунтов · HTML-карточки результатов · контроль квот
 
-[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/badge/version-1.1.2-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
@@ -266,7 +266,7 @@ python -m pytest -q
 ### Слой инструментов (tools/)
 Три `FunctionTool` регистрируются через `add_llm_tools`; LLM сам распознаёт и вызывает их в диалоге:
 - `search_tool.py` — поиск + рендеринг HTML-карточек (при сбое автоматический откат к простому тексту)
-- `download_tool.py` — скачивание по id в `<data>/zlibrary_assistant/books/`, возвращает абсолютный путь
+- `download_tool.py` — скачивание по id в `<data>/plugin_data/zlibrary_assistant/books/`, возвращает абсолютный путь
 - `status_tool.py` — проверка состояния пула аккаунтов
 
 ### Рендеринг карточек (templates.py)
