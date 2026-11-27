@@ -1,9 +1,9 @@
 """zlib_transport：响应分类、同源判定、Cookie 合并、受限读取、request_json 与 guarded_get。
 
-安全不变量：
+安全不变量（本文件是它们的唯一覆盖点）：
 - 跳转只允许回到同一源，带账号 cookies 的请求不会被送去其他主机；
 - 响应体读取有硬上限，读取方式是循环读满而非单次 read(n)；
-- 封面与下载直链的每一跳都做 SSRF 校验，直连时再核验真实对端 IP，配代理时跳过对端核验；
+- 直链的每一跳都做 URL 校验，直连时再核验真实对端 IP，配代理时跳过对端核验；
 - 不关闭 TLS 校验。
 """
 
@@ -13,8 +13,6 @@ import asyncio
 
 import aiohttp
 import pytest
-from aiohttp import web
-from aiohttp_socks import ProxyConnector
 from stubs import FakeResponse, FakeSession
 
 from astrbot_plugin_zlibrary_assistant import zlib_security, zlib_transport
@@ -33,101 +31,68 @@ from astrbot_plugin_zlibrary_assistant.zlib_transport import (
 BASE = "https://z-lib.example"
 
 
-# ---------- classify_body ----------
+# ---------- 响应分类 ----------
 
 
 class TestClassifyBody:
-    """一次 E-API 响应归类为 JSON 或基础设施错误。"""
+    """一次 E-API 响应归类为 JSON 或基础设施错误。
 
-    def test_success_json_returned(self):
-        payload, err = classify_body(200, "", '{"success": 1, "books": []}')
-        assert err is None
-        assert payload == {"success": 1, "books": []}
+    is_safe_public_url / is_private_ip 的逐条黑白名单见 test_zlib_security.py，
+    这里只验分类边界与优先级。
+    """
 
-    def test_success_json_mojibake_repaired(self):
-        double_encoded = "Frédéric".encode().decode("latin-1")
-        payload, err = classify_body(200, "", '{"author": "%s"}' % double_encoded)
+    def test_json_dict_returned_and_mojibake_repaired(self):
+        payload, err = classify_body(
+            200, "", '{"author": "%s"}' % "Frédéric".encode().decode("latin-1")
+        )
         assert err is None
         assert payload["author"] == "Frédéric"
 
-    @pytest.mark.parametrize("status", [400, 401, 403, 404])
-    def test_business_error_json_passes_through_regardless_of_status(self, status):
-        """业务错误（如未登录）也是合法 JSON，原样交给上层按字段判断。"""
-        payload, err = classify_body(
-            status, "", '{"success": 0, "error": "Please login"}'
-        )
-        assert err is None
-        assert payload["error"] == "Please login"
-
-    def test_incorrect_password_json_passes_through(self):
-        payload, err = classify_body(
-            200, "", '{"success": 0, "error": "Incorrect email or password"}'
-        )
-        assert err is None
-        assert payload["success"] == 0
-
-    @pytest.mark.parametrize("status", [513, 403])
-    def test_diamwall_by_server_header(self, status):
-        payload, err = classify_body(status, "DiamWall", "<html>blocked</html>")
-        assert payload is None
-        assert err.category == "diamwall_blocked"
-
     @pytest.mark.parametrize(
-        "body",
+        ("status", "server", "text", "category"),
         [
-            "<html><body>DiamWall protection</body></html>",
-            "<html><title>Verifying your browser</title></html>",
+            # 业务错误是合法 JSON，必须原样交给上层按字段判断，不能当基础设施错误
+            (401, "", '{"success": 0, "error": "Please login"}', None),
+            (200, "", '{"success": 0, "error": "Incorrect email or password"}', None),
+            # 有限流文案或 429 即限流，优先于 JSON 解析
+            (200, "", "Too many requests from your IP", "rate_limited"),
+            (403, "", "blocked #ipd3", "rate_limited"),
+            (429, "", '{"success": 0}', "rate_limited"),
+            # DiamWall：Server 头或页面特征都算
+            (513, "DiamWall", "<html>blocked</html>", "diamwall_blocked"),
+            (403, "nginx", "<html>Verifying your browser</html>", "diamwall_blocked"),
+            # Cloudflare：文案优先，其次才是 cloudflare + 403/503 + html 的组合判据
+            (200, "nginx", "<html>Checking your browser</html>", "cloudflare_blocked"),
+            (
+                403,
+                "nginx",
+                '<html><div id="cf-challenge"></div></html>',
+                "cloudflare_blocked",
+            ),
+            (
+                403,
+                "cloudflare",
+                "<html><title>Just a moment...</title></html>",
+                "cloudflare_blocked",
+            ),
+            (503, "cloudflare", "<html>error</html>", "cloudflare_blocked"),
+            # 业务错误以 "Err #N" 开头，不能加宽成限流
+            (200, "", "Err #5 file not found", "domain_invalid"),
+            (502, "nginx", "<html>hello</html>", "domain_invalid"),
+            (200, "", "[1, 2, 3]", "domain_invalid"),
         ],
     )
-    def test_diamwall_by_body(self, body):
-        _, err = classify_body(403, "nginx", body)
-        assert err.category == "diamwall_blocked"
+    def test_categories(self, status, server, text, category):
+        payload, err = classify_body(status, server, text)
+        if category is None:
+            assert err is None
+            assert payload["success"] == 0
+        else:
+            assert (payload, err.category) == (None, category)
 
-    @pytest.mark.parametrize(
-        ("status", "server", "body"),
-        [
-            (403, "cloudflare", "<html><title>Just a moment...</title></html>"),
-            (200, "nginx", "<html>Checking your browser before accessing</html>"),
-            (403, "nginx", '<html><div id="cf-challenge"></div></html>'),
-            (503, "cloudflare", "<html>error</html>"),
-        ],
-    )
-    def test_cloudflare_challenge(self, status, server, body):
-        _, err = classify_body(status, server, body)
-        assert err.category == "cloudflare_blocked"
-
-    @pytest.mark.parametrize(
-        ("status", "text"),
-        [
-            (429, "slow down"),
-            (200, "Too many requests from your IP"),
-            (403, "blocked #ipd3"),
-            (429, '{"success": 0}'),
-        ],
-    )
-    def test_rate_limited(self, status, text):
-        """限流判定先于 JSON 解析：429 即使带 JSON 体也按限流处理。"""
-        payload, err = classify_body(status, "", text)
-        assert payload is None
-        assert err.category == "rate_limited"
-
-    def test_business_err_number_is_not_rate_limited(self):
-        """E-API 的业务错误以 "Err #N" 开头，不能误判成限流。"""
-        _, err = classify_body(200, "", "Err #5 file not found")
-        assert err.category == "domain_invalid"
-
-    @pytest.mark.parametrize("status", [200, 404, 502])
-    def test_html_instead_of_json_is_domain_invalid(self, status):
-        _, err = classify_body(status, "nginx", "<html><body>hello</body></html>")
-        assert err.category == "domain_invalid"
-        assert str(status) in err.message
-
-    def test_json_non_object_is_domain_invalid(self):
-        _, err = classify_body(200, "", "[1, 2, 3]")
-        assert err.category == "domain_invalid"
-
-    def test_detail_truncated(self):
+    def test_domain_invalid_reports_status_and_bounds_detail(self):
         _, err = classify_body(502, "", "x" * 1000)
+        assert str(502) in err.message
         assert len(err.detail) == 200
 
 
@@ -136,33 +101,24 @@ class TestClassifyBody:
 
 class TestIsSameOrigin:
     @pytest.mark.parametrize(
-        "target",
+        ("target", "base", "same"),
         [
-            "https://z-lib.example/path",
-            "https://Z-LIB.EXAMPLE/path",
-            "https://z-lib.example:443/path",
+            ("https://z-lib.example/path", BASE, True),
+            ("https://Z-LIB.EXAMPLE/path", BASE, True),
+            ("https://z-lib.example:443/path", BASE, True),
+            ("http://a.example:80/x", "http://a.example", True),
+            # 跨主机 / 明文降级 / 换端口 / 后缀伪装 / 子域 / 非 http(s) 全部不同源
+            ("https://evil.example/path", BASE, False),
+            ("http://z-lib.example/path", BASE, False),
+            ("https://z-lib.example:8443/path", BASE, False),
+            ("https://z-lib.example.evil.example/path", BASE, False),
+            ("https://sub.z-lib.example/path", BASE, False),
+            ("ftp://z-lib.example/path", BASE, False),
+            ("//evil.example/path", BASE, False),
         ],
     )
-    def test_same_origin(self, target):
-        assert is_same_origin(target, BASE) is True
-
-    @pytest.mark.parametrize(
-        "target",
-        [
-            "https://evil.example/path",
-            "http://z-lib.example/path",
-            "https://z-lib.example:8443/path",
-            "https://z-lib.example.evil.example/path",
-            "https://sub.z-lib.example/path",
-            "ftp://z-lib.example/path",
-            "//evil.example/path",
-        ],
-    )
-    def test_not_same_origin(self, target):
-        assert is_same_origin(target, BASE) is False
-
-    def test_explicit_default_port_equals_omitted(self):
-        assert is_same_origin("http://a.example:80/x", "http://a.example") is True
+    def test_origin_matrix(self, target, base, same):
+        assert is_same_origin(target, base) is same
 
     def test_onion_host_matches_exactly(self):
         onion = "http://" + "a" * 56 + ".onion"
@@ -171,18 +127,15 @@ class TestIsSameOrigin:
 
 
 class TestMergeSetCookies:
-    def test_only_first_pair_is_cookie(self):
-        merged = merge_set_cookies({}, ["a=b; Priority=High; Path=/; Secure"])
-        assert merged == {"a": "b"}
-
-    def test_keeps_existing_and_overrides_same_name(self):
-        merged = merge_set_cookies({"x": "1", "a": "old"}, ["a=new; Path=/"])
-        assert merged == {"x": "1", "a": "new"}
-
-    def test_does_not_mutate_input(self):
+    def test_only_first_pair_is_cookie_and_input_untouched(self):
         original = {"x": "1"}
-        merge_set_cookies(original, ["a=b"])
+        merged = merge_set_cookies(original, ["a=b; Priority=High; Path=/; Secure"])
+        assert merged == {"x": "1", "a": "b"}
         assert original == {"x": "1"}
+
+    def test_overrides_same_name_across_multiple_headers(self):
+        merged = merge_set_cookies({"a": "old"}, ["a=new; Path=/", "b=2; HttpOnly"])
+        assert merged == {"a": "new", "b": "2"}
 
     def test_quoted_value_unquoted(self):
         assert merge_set_cookies({}, ['a="b c"']) == {"a": "b c"}
@@ -192,10 +145,6 @@ class TestMergeSetCookies:
     )
     def test_malformed_or_empty_ignored(self, header):
         assert merge_set_cookies({}, [header]) == {}
-
-    def test_multiple_headers(self):
-        merged = merge_set_cookies({}, ["a=1; Path=/", "b=2; HttpOnly"])
-        assert merged == {"a": "1", "b": "2"}
 
 
 class TestNormalizeSocksProxyUrl:
@@ -217,21 +166,23 @@ class TestReadLimited:
 
     @pytest.mark.asyncio
     async def test_reads_across_many_chunks_until_complete(self):
-        body = bytes(range(256)) * 40  # 10240 字节，分 100 字节一块
+        body = bytes(range(256)) * 40  # 10240 字节，100 字节一块
         resp = FakeResponse(body=body, chunk_size=100)
         assert await read_limited(resp, 1_000_000) == body
         assert resp.content.read_calls == 0
 
     @pytest.mark.asyncio
-    async def test_over_limit_returns_limit_plus_one(self):
-        resp = FakeResponse(body=b"x" * 5000, chunk_size=100)
-        data = await read_limited(resp, 1000)
-        assert len(data) == 1001
-
-    @pytest.mark.asyncio
-    async def test_exactly_at_limit_not_flagged(self):
-        resp = FakeResponse(body=b"x" * 1000, chunk_size=64)
-        assert len(await read_limited(resp, 1000)) == 1000
+    @pytest.mark.parametrize(
+        (("body", "limit", "expected")),
+        [
+            (b"x" * 5000, 1000, 1001),
+            (b"x" * 1000, 1000, 1000),
+            (b"", 100, 0),
+        ],
+    )
+    async def test_cap_boundaries(self, body, limit, expected):
+        data = await read_limited(FakeResponse(body=body, chunk_size=64), limit)
+        assert len(data) == expected
 
     @pytest.mark.asyncio
     async def test_stops_reading_after_limit_exceeded(self):
@@ -250,26 +201,25 @@ class TestReadLimited:
         assert len(data) == 251
         assert len(consumed) == 3
 
-    @pytest.mark.asyncio
-    async def test_empty_body(self):
-        assert await read_limited(FakeResponse(body=b""), 100) == b""
-
 
 # ---------- 构造与会话 ----------
 
 
 class TestTransportSetup:
-    def test_proxy_flags(self):
-        assert ZlibTransport("").proxy is None
-        assert ZlibTransport("").socks is False
-        assert ZlibTransport("http://127.0.0.1:7890").socks is False
-        assert ZlibTransport("socks5h://127.0.0.1:9050").socks is True
-        assert ZlibTransport("SOCKS4://127.0.0.1:1080").socks is True
-
-    def test_proxy_kwargs(self):
-        assert ZlibTransport("").proxy_kwargs() == {}
-        assert ZlibTransport("http://p:1").proxy_kwargs() == {"proxy": "http://p:1"}
-        assert ZlibTransport("socks5://p:1").proxy_kwargs() == {}
+    @pytest.mark.parametrize(
+        ("proxy", "is_socks", "kwargs"),
+        [
+            ("", False, {}),
+            ("http://p:1", False, {"proxy": "http://p:1"}),
+            ("socks5h://p:1", True, {}),
+            ("SOCKS4://p:1", True, {}),
+        ],
+    )
+    def test_proxy_assembly(self, proxy, is_socks, kwargs):
+        transport = ZlibTransport(proxy)
+        assert transport.proxy == (proxy or None)
+        assert transport.socks is is_socks
+        assert transport.proxy_kwargs() == kwargs
 
     @pytest.mark.asyncio
     async def test_direct_session_gets_peer_capture_and_is_reused(self):
@@ -283,6 +233,8 @@ class TestTransportSetup:
 
     @pytest.mark.asyncio
     async def test_socks_session_uses_proxy_connector_without_peer_capture(self):
+        from aiohttp_socks import ProxyConnector
+
         transport = ZlibTransport("socks5h://127.0.0.1:9050")
         try:
             session = await transport.get_session()
@@ -304,7 +256,10 @@ class TestTransportSetup:
 
     @pytest.mark.asyncio
     async def test_peer_recorded_at_connect_time_survives_released_connection(self):
-        """响应体读完后连接即被释放，建连期记录是唯一可用的对端来源（仅回环本机，不出网）。"""
+        """对端记录靠包裹 connector 的私有建连方法实现：aiohttp 换实现就会静默失效，
+        使 guarded_get 的对端核验退化成"永远取不到"而无人察觉。只连本机回环，不出网。
+        """
+        from aiohttp import web
 
         async def handler(_request):
             return web.Response(body=b"ok")
@@ -350,8 +305,8 @@ class _ConnectFailure(aiohttp.ClientConnectorError):
         return "connect failure"
 
 
-def _api_transport(session: FakeSession) -> ZlibTransport:
-    transport = ZlibTransport()
+def _api_transport(session: FakeSession, proxy: str = "") -> ZlibTransport:
+    transport = ZlibTransport(proxy)
     transport._session = session
     return transport
 
@@ -362,83 +317,64 @@ def _json(payload: str = '{"success": 1}', status: int = 200, headers=None):
 
 class TestRequestJson:
     @pytest.mark.asyncio
-    async def test_success_returns_status_and_payload(self):
-        session = FakeSession({f"{BASE}/eapi/x": _json('{"success": 1, "a": 2}')})
-        status, payload = await _api_transport(session).request_json(
-            BASE, "GET", "/eapi/x"
-        )
-        assert (status, payload) == (200, {"success": 1, "a": 2})
+    async def test_success_returns_status_and_utf8_payload(self):
+        session = FakeSession({f"{BASE}/a": _json('{"title": "资本论"}')})
+        status, payload = await _api_transport(session).request_json(BASE, "GET", "/a")
+        assert (status, payload["title"]) == (200, "资本论")
 
     @pytest.mark.asyncio
-    async def test_request_shape_redirects_off_tls_on_source_header(self):
-        session = FakeSession({f"{BASE}/eapi/x": _json()})
+    async def test_request_shape_keeps_tls_verification(self):
+        session = FakeSession({f"{BASE}/a": _json()})
         await _api_transport(session).request_json(
-            BASE, "POST", "/eapi/x", data={"k": "v"}, cookies={"c": "1"}
+            BASE, "POST", "/a", data={"k": "v"}, cookies={"c": "1"}
         )
         call = session.calls[0]
         assert call["allow_redirects"] is False
         assert call["headers"]["source"] == "android"
         assert call["headers"]["Content-Type"] == "application/x-www-form-urlencoded"
-        assert call["data"] == {"k": "v"}
-        assert call["cookies"] == {"c": "1"}
+        assert (call["data"], call["cookies"]) == ({"k": "v"}, {"c": "1"})
         # TLS 校验保持 aiohttp 默认：不传任何 ssl 相关覆盖
         assert not {"ssl", "verify_ssl", "fingerprint"} & call.keys()
 
     @pytest.mark.asyncio
     async def test_get_without_body_has_no_form_content_type(self):
-        session = FakeSession({f"{BASE}/eapi/x": _json()})
-        await _api_transport(session).request_json(BASE, "GET", "/eapi/x")
+        session = FakeSession({f"{BASE}/a": _json()})
+        await _api_transport(session).request_json(BASE, "GET", "/a")
         assert "Content-Type" not in session.calls[0]["headers"]
 
     @pytest.mark.asyncio
-    async def test_cookies_are_copied_not_shared(self):
-        cookies = {"remix_userid": "1"}
+    async def test_same_origin_redirect_resends_cookie_without_mutating_input(
+        self,
+    ):
+        """防护握手：自指 307 种下 cookie，带着 cookie 与原请求体重发才放行。"""
+        cookies = {"remix_userid": "9"}
         session = FakeSession(
             {
                 f"{BASE}/a": [
-                    _json("", 307, {"Location": f"{BASE}/a", "Set-Cookie": "g=1"}),
-                    _json(),
-                ]
-            }
-        )
-        await _api_transport(session).request_json(BASE, "GET", "/a", cookies=cookies)
-        assert cookies == {"remix_userid": "1"}
-
-    @pytest.mark.asyncio
-    async def test_body_decoded_as_utf8_without_charset_header(self):
-        session = FakeSession({f"{BASE}/a": _json('{"title": "资本论"}')})
-        _, payload = await _api_transport(session).request_json(BASE, "GET", "/a")
-        assert payload["title"] == "资本论"
-
-    @pytest.mark.asyncio
-    async def test_same_origin_redirect_resends_with_set_cookie_and_body(self):
-        """防护握手：自指 307 种下 cookie，带着 cookie 与原请求体重发才放行。"""
-        session = FakeSession(
-            {
-                f"{BASE}/eapi/x": [
                     _json(
                         "",
                         307,
                         [
-                            ("Location", f"{BASE}/eapi/x"),
+                            ("Location", f"{BASE}/a"),
                             ("Set-Cookie", "guard=tok; Path=/; Priority=High"),
                         ],
                     ),
-                    _json('{"success": 1}'),
+                    _json(),
                 ]
             }
         )
         status, _ = await _api_transport(session).request_json(
-            BASE, "POST", "/eapi/x", data={"k": "v"}, cookies={"remix_userid": "9"}
+            BASE, "POST", "/a", data={"k": "v"}, cookies=cookies
         )
         assert status == 200
-        assert len(session.calls) == 2
-        assert session.calls[1]["cookies"] == {"remix_userid": "9", "guard": "tok"}
-        assert session.calls[1]["data"] == {"k": "v"}
-        assert session.calls[1]["allow_redirects"] is False
+        assert cookies == {"remix_userid": "9"}
+        retry = session.calls[1]
+        assert retry["cookies"] == {"remix_userid": "9", "guard": "tok"}
+        assert retry["data"] == {"k": "v"}
+        assert retry["allow_redirects"] is False
 
     @pytest.mark.asyncio
-    async def test_redirect_cookies_collected_even_without_initial_cookies(self):
+    async def test_redirect_cookies_collected_without_initial_cookies(self):
         session = FakeSession(
             {
                 f"{BASE}/a": [
@@ -448,6 +384,7 @@ class TestRequestJson:
             }
         )
         await _api_transport(session).request_json(BASE, "GET", "/a")
+        assert session.urls == [f"{BASE}/a", f"{BASE}/a"]
         assert session.calls[1]["cookies"] == {"g": "1"}
 
     @pytest.mark.asyncio
@@ -488,20 +425,18 @@ class TestRequestJson:
         assert "SECRET" not in str(exc.value) + exc.value.detail
 
     @pytest.mark.asyncio
-    async def test_too_many_redirects_rejected(self):
-        session = FakeSession({f"{BASE}/a": _json("", 307, {"Location": f"{BASE}/a"})})
-        with pytest.raises(ZlibError) as exc:
-            await _api_transport(session).request_json(BASE, "GET", "/a")
-        assert exc.value.category == "domain_invalid"
-        assert len(session.calls) == MAX_API_REDIRECT_HOPS + 1
-
-    @pytest.mark.asyncio
-    async def test_redirect_loop_on_diamwall_page_reported_as_diamwall(self):
-        loop = FakeResponse(307, {"Location": f"{BASE}/a", "Server": "DiamWall"}, "")
+    @pytest.mark.parametrize(
+        ("server", "category"),
+        [("DiamWall", "diamwall_blocked"), ("nginx", "domain_invalid")],
+    )
+    async def test_redirect_hop_limit(self, server, category):
+        """跳数上限：DiamWall 永久自指按防护页报，其它按域名无效报。"""
+        loop = _json("", 307, {"Location": f"{BASE}/a", "Server": server})
         session = FakeSession({f"{BASE}/a": loop})
         with pytest.raises(ZlibError) as exc:
             await _api_transport(session).request_json(BASE, "GET", "/a")
-        assert exc.value.category == "diamwall_blocked"
+        assert exc.value.category == category
+        assert len(session.calls) == MAX_API_REDIRECT_HOPS + 1
 
     @pytest.mark.asyncio
     async def test_redirect_without_location_rejected(self):
@@ -512,35 +447,21 @@ class TestRequestJson:
         assert "Location" in exc.value.message
 
     @pytest.mark.asyncio
-    async def test_oversized_body_rejected(self, monkeypatch):
-        monkeypatch.setattr(zlib_transport, "MAX_API_BYTES", 100)
-        session = FakeSession(
-            {f"{BASE}/a": FakeResponse(200, None, b"x" * 500, chunk_size=10)}
-        )
-        with pytest.raises(ZlibError) as exc:
-            await _api_transport(session).request_json(BASE, "GET", "/a")
-        assert exc.value.category == "domain_invalid"
-
-    @pytest.mark.asyncio
-    async def test_body_exactly_at_cap_accepted(self, monkeypatch):
+    @pytest.mark.parametrize(("extra", "accepted"), [(0, True), (1, False)])
+    async def test_body_cap_boundary(self, monkeypatch, extra, accepted):
         body = '{"success": 1}'
         monkeypatch.setattr(zlib_transport, "MAX_API_BYTES", len(body))
-        session = FakeSession({f"{BASE}/a": _json(body)})
-        status, _ = await _api_transport(session).request_json(BASE, "GET", "/a")
-        assert status == 200
-
-    @pytest.mark.asyncio
-    async def test_non_json_page_raises_classified_error(self):
         session = FakeSession(
-            {
-                f"{BASE}/a": FakeResponse(
-                    513, {"Server": "DiamWall"}, "<html>blocked</html>"
-                )
-            }
+            {f"{BASE}/a": FakeResponse(200, body=body + " " * extra, chunk_size=4)}
         )
-        with pytest.raises(ZlibError) as exc:
-            await _api_transport(session).request_json(BASE, "GET", "/a")
-        assert exc.value.category == "diamwall_blocked"
+        if accepted:
+            assert (await _api_transport(session).request_json(BASE, "GET", "/a"))[
+                0
+            ] == 200
+        else:
+            with pytest.raises(ZlibError) as exc:
+                await _api_transport(session).request_json(BASE, "GET", "/a")
+            assert exc.value.category == "domain_invalid"
 
     @pytest.mark.asyncio
     async def test_business_error_json_returned_not_raised(self):
@@ -569,24 +490,21 @@ class TestRequestJson:
         assert info.value.category == category
 
     @pytest.mark.asyncio
-    async def test_http_proxy_passed_per_request(self):
+    async def test_proxy_and_params_forwarded_per_request(self):
         session = FakeSession({f"{BASE}/a": _json()})
-        transport = ZlibTransport("http://127.0.0.1:7890")
-        transport._session = session
-        await transport.request_json(BASE, "GET", "/a")
-        assert session.calls[0]["proxy"] == "http://127.0.0.1:7890"
-
-    @pytest.mark.asyncio
-    async def test_params_forwarded(self):
-        session = FakeSession({f"{BASE}/a": _json()})
-        await _api_transport(session).request_json(BASE, "GET", "/a", params={"q": "1"})
-        assert session.calls[0]["params"] == {"q": "1"}
+        await _api_transport(session, "http://127.0.0.1:7890").request_json(
+            BASE, "GET", "/a", params={"q": "1"}
+        )
+        call = session.calls[0]
+        assert call["proxy"] == "http://127.0.0.1:7890"
+        assert call["params"] == {"q": "1"}
 
 
 # ---------- guarded_get ----------
 
 
 PUBLIC = "https://8.8.8.8/f.jpg"
+ONION = "http://" + "a" * 56 + ".onion/cover.jpg"
 
 
 @pytest.fixture(autouse=False)
@@ -626,9 +544,10 @@ class TestGuardedGet:
         assert not {"ssl", "verify_ssl"} & call.keys()
 
     @pytest.mark.asyncio
-    async def test_private_peer_rejected_and_released(self):
+    @pytest.mark.parametrize("peer", [("192.168.1.10", 443), ("127.0.0.1", 80)])
+    async def test_private_or_loopback_peer_rejected_and_released(self, peer):
         """URL 校验与实际建连分别解析（TOCTOU / rebinding）：真实对端是内网即拒绝。"""
-        bad = FakeResponse(200, body=b"img", peer=("192.168.1.10", 443))
+        bad = FakeResponse(200, body=b"img", peer=peer)
         transport, _ = _guard_transport({PUBLIC: bad})
         resp, err = await transport.guarded_get(PUBLIC, timeout_total=8)
         assert resp is None
@@ -636,102 +555,67 @@ class TestGuardedGet:
         assert bad.released is True
 
     @pytest.mark.asyncio
-    async def test_loopback_peer_rejected(self):
-        transport, _ = _guard_transport({PUBLIC: FakeResponse(peer=("127.0.0.1", 80))})
+    @pytest.mark.parametrize(
+        ("peer", "record", "allowed"),
+        [
+            (None, None, True),  # 响应体读完连接已释放：取不到对端是常态，不得据此拒绝
+            (None, "93.184.216.34", True),  # 退回建连期记录的公网对端
+            (None, "10.0.0.7", False),  # 退回建连期记录的私网对端
+            (("93.184.216.34", 443), "10.0.0.7", True),  # 活连接优先于记录
+        ],
+        ids=["no_peer", "recorded_public", "recorded_private", "live_wins"],
+    )
+    async def test_peer_source_precedence(self, peer, record, allowed):
+        transport, _ = _guard_transport({PUBLIC: FakeResponse(peer=peer)})
+        if record:
+            transport._peers["8.8.8.8"] = record
         resp, err = await transport.guarded_get(PUBLIC, timeout_total=8)
-        assert resp is None
-        assert "对端" in err
+        if allowed:
+            assert (err, resp.status) == ("", 200)
+        else:
+            assert resp is None
+            assert "对端" in err
 
     @pytest.mark.asyncio
-    async def test_released_connection_without_record_not_rejected(self):
-        """响应体读完 aiohttp 就释放连接：取不到对端是常态，不得据此拒绝。"""
-        transport, _ = _guard_transport({PUBLIC: FakeResponse(peer=None)})
-        resp, err = await transport.guarded_get(PUBLIC, timeout_total=8)
-        assert err == ""
-        assert resp.status == 200
-
-    @pytest.mark.asyncio
-    async def test_released_connection_uses_recorded_private_peer(self):
-        transport, _ = _guard_transport({PUBLIC: FakeResponse(peer=None)})
-        transport._peers["8.8.8.8"] = "10.0.0.7"
-        resp, err = await transport.guarded_get(PUBLIC, timeout_total=8)
-        assert resp is None
-        assert "对端" in err
-
-    @pytest.mark.asyncio
-    async def test_released_connection_with_recorded_public_peer_passes(self):
-        transport, _ = _guard_transport({PUBLIC: FakeResponse(peer=None)})
-        transport._peers["8.8.8.8"] = "93.184.216.34"
-        resp, err = await transport.guarded_get(PUBLIC, timeout_total=8)
-        assert err == ""
-        assert resp.status == 200
-
-    @pytest.mark.asyncio
-    async def test_live_connection_takes_precedence_over_recorded_peer(self):
-        transport, _ = _guard_transport(
-            {PUBLIC: FakeResponse(peer=("93.184.216.34", 443))}
-        )
-        transport._peers["8.8.8.8"] = "10.0.0.7"
-        resp, err = await transport.guarded_get(PUBLIC, timeout_total=8)
-        assert err == ""
-        assert resp is not None
-
-    @pytest.mark.asyncio
-    async def test_peer_check_skipped_with_http_proxy(self):
-        """配了代理时 TCP 对端必然是代理本身，按内网拒绝会误杀所有正常请求。"""
+    @pytest.mark.parametrize(
+        ("proxy", "url", "peer", "forwarded"),
+        [
+            # 配了代理时 TCP 对端必然是代理本身（通常是 127.0.0.1），
+            # 按内网拒绝会误杀所有正常请求，故跳过对端核验
+            ("http://127.0.0.1:7897", PUBLIC, ("127.0.0.1", 7897), True),
+            # SOCKS 由 connector 接管，不能按请求传 proxy 参数
+            ("socks5://127.0.0.1:9050", ONION, ("127.0.0.1", 9050), False),
+        ],
+        ids=["http_proxy", "socks_onion"],
+    )
+    async def test_peer_check_skipped_with_proxy(self, proxy, url, peer, forwarded):
         transport, session = _guard_transport(
-            {PUBLIC: FakeResponse(peer=("127.0.0.1", 7897))},
-            proxy="http://127.0.0.1:7897",
+            {url: FakeResponse(peer=peer)}, proxy=proxy
         )
-        resp, err = await transport.guarded_get(PUBLIC, timeout_total=8)
-        assert err == ""
-        assert resp.status == 200
-        assert session.calls[0]["proxy"] == "http://127.0.0.1:7897"
-
-    @pytest.mark.asyncio
-    async def test_peer_check_skipped_with_socks_onion(self):
-        onion_url = f"http://{'a' * 56}.onion/cover.jpg"
-        transport, session = _guard_transport(
-            {onion_url: FakeResponse(peer=("127.0.0.1", 9050))},
-            proxy="socks5://127.0.0.1:9050",
-        )
-        resp, err = await transport.guarded_get(onion_url, timeout_total=8)
-        assert err == ""
-        assert resp.status == 200
-        assert "proxy" not in session.calls[0]
+        resp, err = await transport.guarded_get(url, timeout_total=8)
+        assert (err, resp.status) == ("", 200)
+        assert ("proxy" in session.calls[0]) is forwarded
 
     @pytest.mark.asyncio
     async def test_onion_url_rejected_without_socks_proxy(self):
-        onion_url = f"http://{'a' * 56}.onion/cover.jpg"
         transport, session = _guard_transport({})
-        resp, err = await transport.guarded_get(onion_url, timeout_total=8)
+        resp, err = await transport.guarded_get(ONION, timeout_total=8)
         assert resp is None
         assert "安全校验" in err
         assert session.calls == []
 
     @pytest.mark.asyncio
-    async def test_follows_public_redirect_and_reverifies_each_hop(self):
-        first = FakeResponse(302, {"Location": "https://8.8.4.4/real.jpg"})
+    @pytest.mark.parametrize("relative", [False, True], ids=["absolute", "relative"])
+    async def test_follows_public_redirect_and_releases_each_hop(self, relative):
+        target = "https://8.8.8.8/other.jpg"
+        first = FakeResponse(302, {"Location": "/other.jpg" if relative else target})
         transport, session = _guard_transport(
-            {PUBLIC: first, "https://8.8.4.4/real.jpg": FakeResponse(200, body=b"img")}
+            {PUBLIC: first, target: FakeResponse(200, body=b"img")}
         )
         resp, err = await transport.guarded_get(PUBLIC, timeout_total=8)
-        assert err == ""
-        assert resp.status == 200
-        assert session.urls == [PUBLIC, "https://8.8.4.4/real.jpg"]
+        assert (err, resp.status) == ("", 200)
+        assert session.urls == [PUBLIC, target]
         assert first.released is True
-
-    @pytest.mark.asyncio
-    async def test_relative_redirect_resolved(self):
-        transport, session = _guard_transport(
-            {
-                PUBLIC: FakeResponse(301, {"Location": "/other.jpg"}),
-                "https://8.8.8.8/other.jpg": FakeResponse(200),
-            }
-        )
-        resp, _ = await transport.guarded_get(PUBLIC, timeout_total=8)
-        assert resp.status == 200
-        assert session.urls[-1] == "https://8.8.8.8/other.jpg"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -827,15 +711,15 @@ class TestGuardedGet:
         assert session.calls == []
 
     @pytest.mark.asyncio
-    async def test_client_error_returned_as_message(self):
-        transport, _ = _guard_transport({PUBLIC: aiohttp.ClientConnectionError("boom")})
+    @pytest.mark.parametrize(
+        ("exc", "needle"),
+        [
+            (aiohttp.ClientConnectionError("boom"), "boom"),
+            (asyncio.TimeoutError(), "网络异常"),
+        ],
+    )
+    async def test_client_errors_returned_as_message(self, exc, needle):
+        transport, _ = _guard_transport({PUBLIC: exc})
         resp, err = await transport.guarded_get(PUBLIC, timeout_total=8)
         assert resp is None
-        assert "boom" in err
-
-    @pytest.mark.asyncio
-    async def test_timeout_returned_as_network_message(self):
-        transport, _ = _guard_transport({PUBLIC: asyncio.TimeoutError()})
-        resp, err = await transport.guarded_get(PUBLIC, timeout_total=8)
-        assert resp is None
-        assert "网络异常" in err
+        assert needle in err

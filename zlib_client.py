@@ -12,6 +12,7 @@ import base64
 import json
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -46,6 +47,12 @@ _AUTH_KEYWORDS = ("login", "password", "authoriz", "unauthor", "credential")
 _QUOTA_KEYWORDS = ("limit", "daily", "quota", "exceed")
 
 MAX_PAGE_LIMIT = 50
+
+# 下载流式写盘的回调签名：
+# ChunkSink 收到 (文件名, 数据块)，负责把它写进文件；
+# ProgressHook 收到 (已读字节, 声明总字节)，声明总字节未知时为 0。
+ChunkSink = Callable[[str, bytes], Awaitable[None]]
+ProgressHook = Callable[[int, int], Awaitable[None]]
 
 
 @dataclass
@@ -99,7 +106,7 @@ class ZlibClient:
     ):
         self.accounts = accounts
         self.proxy = proxy
-        self.max_download_bytes = max(1, int(max_download_mb)) * 1024 * 1024
+        self.max_download_bytes = min(512, max(1, int(max_download_mb))) * 1024 * 1024
         self.timeout = timeout
         self.transport = ZlibTransport(proxy, timeout)
         self.domains = DomainPool(domains, allow_onion=self.transport.socks)
@@ -361,7 +368,19 @@ class ZlibClient:
         # 拼上扩展名后再清洗一遍：文件名是写盘入口，任何一段都不能带分隔符或 ..
         return str(link), sanitize_filename(name)
 
-    async def _fetch_file(self, link: str) -> bytes:
+    async def _fetch_file(
+        self,
+        link: str,
+        *,
+        filename: str = "",
+        sink: ChunkSink | None = None,
+        on_progress: ProgressHook | None = None,
+    ) -> bytes:
+        """下载文件字节。
+
+        sink 非空时边读边交给它（大文件不整块驻留内存），返回值为空 bytes；
+        为空时把全部内容收进返回值（小文件与测试用）。
+        """
         resp, err = await self.transport.guarded_get(
             link, timeout_total=self.timeout * 4
         )
@@ -375,7 +394,25 @@ class ZlibClient:
                     raise ZlibError(
                         "api_error", f"下载失败（HTTP {resp.status}）", link[:200]
                     )
-                content = await read_limited(resp, self.max_download_bytes)
+
+                received = 0
+
+                async def write(chunk: bytes) -> None:
+                    nonlocal received
+                    received += len(chunk)
+                    if sink is not None:
+                        await sink(filename, chunk)
+
+                content = await read_limited(
+                    resp,
+                    self.max_download_bytes,
+                    sink=write if sink is not None else None,
+                    on_progress=on_progress,
+                )
+                if sink is not None:
+                    size = received
+                else:
+                    size = len(content)
         except (
             aiohttp.ClientConnectorError,
             aiohttp.ServerTimeoutError,
@@ -384,9 +421,9 @@ class ZlibClient:
             raise ZlibError("network_error", "下载网络异常", str(e)) from e
         except aiohttp.ClientError as e:
             raise ZlibError("network_error", "下载失败", str(e)) from e
-        if not content:
+        if size == 0:
             raise ZlibError("api_error", "下载到的文件为空", link[:200])
-        if len(content) > self.max_download_bytes:
+        if size > self.max_download_bytes:
             raise ZlibError(
                 "api_error",
                 f"文件超过插件允许的 {self.max_download_bytes // 1024 // 1024} MiB 上限",
@@ -394,9 +431,40 @@ class ZlibClient:
             )
         return content
 
-    async def download(self, book: Book) -> tuple[Account, str, bytes]:
+    async def _transfer(
+        self,
+        account: Account,
+        book: Book,
+        *,
+        sink: ChunkSink | None,
+        on_progress: ProgressHook | None,
+    ) -> tuple[str, int, bytes]:
+        """用指定账号完成一次传输：取直链 → 下载 → 记账。"""
+        link, filename = await self.get_download_link(account, book)
+        content = await self._fetch_file(
+            link, filename=filename, sink=sink, on_progress=on_progress
+        )
+        account.downloads_today += 1
+        await self._refresh_quota(account)
+        size = len(content) if sink is None else 0
+        logger.info(
+            f"下载成功: {filename}"
+            + (f" ({size} bytes)" if size else "")
+            + f"，账号 {account.name} 剩余 {account.downloads_left} 次"
+        )
+        return filename, size, content
+
+    async def download(
+        self,
+        book: Book,
+        *,
+        sink: ChunkSink | None = None,
+        on_progress: ProgressHook | None = None,
+    ) -> tuple[Account, str, bytes]:
         """下载一本书：依次尝试有额度的账号，登录失效或额度用尽就换下一个。
 
+        sink: `async (filename, chunk)`，边下边写盘；给了 sink 时不返回内容字节。
+        on_progress: `async (已读字节, 声明总字节)`，声明总字节未知时为 0。
         返回 (使用的账号, 文件名, 内容)。
         """
         await self.ensure_login()
@@ -416,7 +484,9 @@ class ZlibClient:
                 break
             tried.add(account.name)
             try:
-                link, filename = await self.get_download_link(account, book)
+                filename, size, content = await self._transfer(
+                    account, book, sink=sink, on_progress=on_progress
+                )
             except ZlibError as e:
                 if e.category == "auth_failed":
                     account.logged_in = False
@@ -428,13 +498,6 @@ class ZlibClient:
                     last_error = e
                     continue
                 raise
-            content = await self._fetch_file(link)
-            account.downloads_today += 1
-            await self._refresh_quota(account)
-            logger.info(
-                f"下载成功: {filename} ({len(content)} bytes)，"
-                f"账号 {account.name} 剩余 {account.downloads_left} 次"
-            )
             return account, filename, content
         if last_error is not None and last_error.category == "auth_failed":
             raise last_error

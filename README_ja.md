@@ -47,7 +47,9 @@ AstrBot WebUI のプラグインマーケットで「Zlibrary助手」を検索�
 |----------|------|
 | `/zlib 搜索 キーワード [-l 言語] [-e 形式] [-n 件数]` | 検索。例：`/zlib 搜索 資本論 -l zh -e pdf`。別名 `search`、`s`、`搜` |
 | `/zlib 下一页` / `/zlib 上一页` | 直近の検索結果をページ送り。別名 `next`/`n`、`prev`/`p` |
+| `/zlib 详情 番号または id` | 1 冊の詳細（出版社、ページ数、叢書、分類、あらすじ）。別名 `detail`、`d`、`详` |
 | `/zlib 下载 番号または id` | 番号は現在のセッションの直近の結果を指します。ページ内の件数を超える数字は書籍 id として扱います。別名 `download`、`dl`、`下` |
+| `/zlib 3` | `/zlib 下载 3` の短縮形（`/zl 3` も可） |
 | `/zlib 状态` | アカウントのログイン状態と本日の残り枠（管理者のみ）。別名 `status` |
 | `/zlib 诊断` | 各ミラーの到達性と遅延を調べ、アカウントのログインを確認（管理者のみ）。別名 `diag` |
 | `/zlib 帮助` | コマンドの説明。別名 `help` |
@@ -60,8 +62,8 @@ AstrBot WebUI のプラグインマーケットで「Zlibrary助手」を検索�
 
 | ツール | パラメータ | 説明 |
 |--------|------------|------|
-| `zlib_search_books` | `query`（必須）、`limit`、`page`、`language`、`extension` | 検索。カード画像のパスと id 付きテキスト一覧を返します |
-| `zlib_download_book` | `book_id`（必須） | 検索結果の id でダウンロード。枠を消費するため、ユーザーが明示的に求めた場合のみ呼び出します |
+| `zlib_search_books` | `query`（必須）、`limit`、`page`、`language`、`extension` | 検索。結果カードはプラグインが送信し、モデルには id とあらすじ付きのテキスト一覧を渡します |
+| `zlib_download_book` | `book_id`（必須） | 検索結果の id でダウンロード。枠を消費するため、ユーザーが明示的に求めた場合のみ呼び出します。ファイルはプラグインが送信します |
 | `zlib_get_status` | なし | アカウントプールの状態。管理者セッションのみ |
 
 ```
@@ -71,7 +73,7 @@ AstrBot WebUI のプラグインマーケットで「Zlibrary助手」を検索�
 モデルの呼び出し: zlib_download_book(book_id=<検索結果の id>)
 ```
 
-書誌フィールドは、ツール結果に入る前に区切りマーカーを除去し長さを制限します。題名に紛れた指示によるプロンプトインジェクションのリスクを下げるためです。ツールがファイルパスを返したら、モデルが `send_message_to_user`（`type=file`）で送信します。
+書誌フィールドは、ツール結果に入る前に区切りマーカーを除去し長さを制限します。題名に紛れた指示によるプロンプトインジェクションのリスクを下げるためです。ツール呼び出しで必要な送信（結果カード、ダウンロードしたファイル）はプラグインが直接行うため、モデルは結果を言葉で説明するだけで、ローカルパスを扱いません。
 
 ---
 
@@ -181,11 +183,16 @@ Tor をインストールして起動し、SOCKS ポートをローカルのみ�
 |------------|------|
 | `zlib_transport.py` | aiohttp トランスポート：ヘッダー、同一オリジンの手動リダイレクトと Cookie 統合、応答分類、上限付き読み取り、保護されたダウンロード GET（SSRF と接続先検証） |
 | `zlib_domains.py` | ミラープール：ユーザー/内蔵/学習の 3 階層、冷却、フェイルオーバー、一括プローブ |
-| `zlib_client.py` | E-API クライアント：アカウントプールのログイン、検索、ダウンロードリンク、表紙取得、状態と診断 |
+| `zlib_client.py` | E-API クライアント：アカウントプールのログイン、検索、ダウンロードリンク、表紙取得、ストリーミングダウンロード、状態と診断 |
 | `zlib_service.py` | コマンドとツールが共有する業務層：検索、カード、番号の解決、ダウンロードの保存 |
 | `zlib_cards.py` | カードの HTML テンプレートと描画データ（全書誌フィールドを明示的にエスケープ） |
+| `zlib_models.py` | 書誌・検索結果・アカウントのデータモデル、およびモデルへ渡す書誌行と詳細の書式 |
 | `zlib_store.py` | 書誌キャッシュ（永続化）とセッションごとの検索記憶 |
 | `zlib_format.py` | コマンド引数の解析とテキスト整形 |
+| `zlib_text.py` | 文字化け修復、ファイル名の整形、あらすじの整形と長さ制限、表紙の縮小 |
+| `zlib_security.py` | SSRF 検証：プライベートアドレス判定、DNS の再検証、onion アドレスの規則 |
+| `zlib_errors.py` | エラー分類と、フェイルオーバーを起こす分類 |
+| `zlib_paths.py` | プラグインのデータディレクトリ |
 | `tools/` | 3 つの LLM ツール |
 
 ダウンロードしたファイルは `<data>/plugin_data/zlibrary_assistant/books/` に保存され、7 日間保持されます。
@@ -218,17 +225,7 @@ AstrBot のテキスト画像化はクラウドレンダリングを優先し、
 2. 実行中のコンテナ：`docker exec -it <コンテナ名> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"`
 3. 任意の CJK フォントを `data/font.ttf` としてコピー：`docker cp msyh.ttc <コンテナ名>:/AstrBot/data/font.ttf`
 
-### Q6：LLM がダウンロードを終えてもファイルを送れない（"Sandbox runtime is disabled by configuration"）
-
-`send_message_to_user` によるローカルファイルの送信は AstrBot の `computer_use_runtime` に依存し、既定は `none` です。WebUI の 設定 → プロバイダー設定 で `computer_use_runtime` を `local` に変更し（必要なら `computer_use_require_admin` を `false` に）、または `data/config/astrbot_config.json` に次を書き込みます。
-
-```json
-{"provider_settings": {"computer_use_runtime": "local", "computer_use_require_admin": false}}
-```
-
-保存後に AstrBot を再起動してください。`/zlib 下载` コマンドはファイルを直接送信するため影響を受けません。
-
-### Q7：Docker で検索が遅い、表紙がすべてプレースホルダーになる
+### Q6：Docker で検索が遅い、表紙がすべてプレースホルダーになる
 
 コンテナは独立したネットワークで、`http://127.0.0.1:ポート` はコンテナ自身を指します。`proxy` にはコンテナから到達できるアドレスを設定してください。Docker Desktop なら `http://host.docker.internal:ポート`、Linux ならホストの LAN IP を使い、プロキシソフトで LAN 接続を許可します。認証が必要なら `http://ユーザー名:パスワード@IP:ポート` と書きます。クラウドのテキスト画像化に届かない場合、レンダリングには 25 秒のタイムアウトがありテキスト一覧に切り替わります。それでも時間が足りなければ `agent_runner.config.misc.tool_call_timeout` を大きくしてください。
 

@@ -250,6 +250,7 @@ class FakeClient:
 
     def __init__(self, books=None, *, total_pages=1, page=1):
         self.book_cache = BookCache()
+        self.accounts = []
         self.books = books if books is not None else [make_book(i) for i in (1, 2, 3)]
         self.total_pages = total_pages
         self.page = page
@@ -283,10 +284,18 @@ class FakeClient:
         self.cover_calls.append(url)
         return "data:image/jpeg;base64,AAAA" if url else ""
 
-    async def download(self, book):
+    async def download(self, book, *, sink=None, on_progress=None):
+        """按预设结果「下载」：有 sink 时模拟流式落盘，返回值内容恒为空。"""
         if self.download_error:
             raise self.download_error
-        return self.download_result
+        account, filename, content = self.download_result
+        if sink is not None:
+            for i in range(0, len(content), 4):
+                await sink(filename, content[i : i + 4])
+            if on_progress is not None:
+                await on_progress(len(content), len(content))
+            content = b""
+        return account, filename, content
 
 
 __all__ = [

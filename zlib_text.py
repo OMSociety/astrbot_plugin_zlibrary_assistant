@@ -70,6 +70,25 @@ def flatten_field(value, limit: int = 120) -> str:
     return flat[:limit]
 
 
+_HTML_TAG = re.compile(r"<[^>]{0,40}>")
+_SPACE_RUN = re.compile(r"\s+")
+
+# 简介常是扫描件目录（"1 (p0-1): 标题<br>28 (p0-2): …"），压成单行后信息密度低，
+# 保留开头一段足以判断是不是要找的那本书
+DESCRIPTION_LIMIT = 240
+
+
+def clean_description(value, limit: int = DESCRIPTION_LIMIT) -> str:
+    """把简介压成单行纯文本：去掉 HTML 标签、合并空白、限长。
+
+    简介来自扫描件目录，带 `<br>` 换行与页码标记；直接进卡片或 LLM 上下文
+    会把版面撑坏，因此先去标签再压空白，最后交给 flatten_field 限长与去围栏。
+    """
+    text = _HTML_TAG.sub(" ", str(value if value is not None else ""))
+    text = _SPACE_RUN.sub(" ", text).strip()
+    return flatten_field(text, limit)
+
+
 def guess_image_mime(content: bytes) -> str:
     """按文件头魔数判断图片真实类型（比响应头 Content-Type 可靠）。"""
     if content.startswith(b"\x89PNG\r\n\x1a\n"):

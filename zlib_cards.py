@@ -148,11 +148,17 @@ SEARCH_CARD_TMPL = """<!DOCTYPE html>
 """
 
 
-def build_card_data(result: SearchResult, covers: dict[int, str], prefix: str) -> dict:
+def build_card_data(
+    result: SearchResult,
+    covers: dict[int, str],
+    prefix: str,
+    quota_hint: str = "",
+) -> dict:
     """构造模板数据。
 
     covers: book id -> data URI（缺失表示用占位）；
-    prefix: 指令前缀，用于页脚提示（例如 "/zlib"）。
+    prefix: 指令前缀，用于页脚提示（例如 "/zlib"）；
+    quota_hint: 账号额度提示，空串表示不提额度。
     """
     books = []
     for i, b in enumerate(result.books[:MAX_CARD_BOOKS], start=1):
@@ -173,9 +179,11 @@ def build_card_data(result: SearchResult, covers: dict[int, str], prefix: str) -
             }
         )
     meta = f"第 {result.page}/{result.total_pages} 页 · 共 {result.total_items} 条"
-    hints = [f"回复 {prefix} 下载 序号 获取文件"]
+    hints = [f"回复 {prefix} 详情 序号 看简介", f"{prefix} 下载 序号 取文件"]
     if result.has_next:
-        hints.append(f"{prefix} 下一页 翻页")
+        hints.append(f"{prefix} 下一页")
+    if quota_hint:
+        hints.append(quota_hint)
     return {
         "query": flatten_field(result.query, 60),
         "meta": meta,

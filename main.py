@@ -1,13 +1,15 @@
 """ZLibrary Assistant - AstrBot 插件入口。
 
-用户指令（/zlib 命令组）：搜索、下载、下一页、上一页、状态、诊断、帮助。
+用户指令（/zlib 命令组）：搜索、详情、下载、下一页、上一页、状态、诊断、帮助。
 LLM 工具：zlib_search_books、zlib_download_book、zlib_get_status。
-指令与工具共用 ZlibService（搜索 + 卡片 + 下载 + 落盘）。
+指令与工具共用 ZlibService，两条入口互不掺和：指令侧一切由指令驱动，
+工具的交付（卡片、文件）由插件直接发出，不要求模型转述路径。
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 from astrbot.api import AstrBotConfig, logger
@@ -29,7 +31,7 @@ from .zlib_format import (
     parse_search_args,
     strip_command,
 )
-from .zlib_models import Account
+from .zlib_models import Account, book_detail_lines
 from .zlib_paths import plugin_data_dir
 from .zlib_service import ZlibService, format_book_lines
 
@@ -37,12 +39,16 @@ COMMAND_PREFIX = "/zlib"
 
 # 子指令名与别名：参数解析靠它从原始消息里剥掉“组名 + 子指令”
 _SUB_SEARCH = {"搜索", "搜", "search", "s"}
+_SUB_DETAIL = {"详情", "详", "detail", "d"}
 _SUB_DOWNLOAD = {"下载", "下", "download", "dl"}
 _SUB_NEXT = {"下一页", "下页", "next", "n"}
 _SUB_PREV = {"上一页", "上页", "prev", "p"}
 _SUB_STATUS = {"状态", "status"}
 _SUB_DIAG = {"诊断", "diag"}
 _SUB_HELP = {"帮助", "help"}
+
+# `/zlib 3` 这种「组名 + 序号」的简写：等价于 `/zlib 下载 3`
+_BARE_REF_REGEX = r"^/?zl(?:ib)?\s+\d+\s*$"
 
 # 后台预热的重试节奏：网络刚起来时首次探测常失败，有限次重试避免永久停在未就绪
 _WARMUP_DELAYS = (0, 10, 20, 30, 45, 60)
@@ -181,6 +187,19 @@ class ZLibraryAssistantPlugin(Star):
         ):
             yield r
 
+    @zlib.command("详情", alias=_SUB_DETAIL)
+    async def cmd_detail(self, event: AstrMessageEvent):
+        """查看某本书的完整信息：详情 序号"""
+        try:
+            book = self.service.resolve_book(
+                event.unified_msg_origin,
+                strip_command(event.message_str, _SUB_DETAIL),
+            )
+        except ZlibError as e:
+            yield event.plain_result(e.message)
+            return
+        yield event.plain_result("\n".join(book_detail_lines(book)))
+
     @zlib.command("下一页", alias=_SUB_NEXT)
     async def cmd_next(self, event: AstrMessageEvent):
         """搜索结果下一页"""
@@ -213,7 +232,11 @@ class ZLibraryAssistantPlugin(Star):
             yield event.chain_result([Image.fromFileSystem(outcome.card_path)])
             return
         lines = format_book_lines(result.books)
-        footer = f"第 {result.page}/{result.total_pages} 页，共 {result.total_items} 条。回复 {COMMAND_PREFIX} 下载 序号"
+        footer = (
+            f"第 {result.page}/{result.total_pages} 页，共 {result.total_items} 条。"
+            f"回复 {COMMAND_PREFIX} 详情 序号 看简介，"
+            f"{COMMAND_PREFIX} 下载 序号 取文件"
+        )
         if result.has_next:
             footer += f"；{COMMAND_PREFIX} 下一页 翻页"
         yield event.plain_result("\n".join(lines) + "\n" + footer)
@@ -221,15 +244,29 @@ class ZLibraryAssistantPlugin(Star):
     @zlib.command("下载", alias=_SUB_DOWNLOAD)
     async def cmd_download(self, event: AstrMessageEvent):
         """下载图书：下载 序号（或书的 id）"""
+        async for r in self._download_reply(
+            event, strip_command(event.message_str, _SUB_DOWNLOAD)
+        ):
+            yield r
+
+    @filter.regex(_BARE_REF_REGEX)
+    async def cmd_bare_ref(self, event: AstrMessageEvent):
+        """`/zlib 3` 简写：等价于 `/zlib 下载 3`"""
+        ref = (event.message_str or "").strip().rsplit(maxsplit=1)[-1]
+        async for r in self._download_reply(event, ref):
+            yield r
+        event.stop_event()
+
+    async def _download_reply(self, event: AstrMessageEvent, ref: str):
         if self.download_admin_only and not event.is_admin():
             yield event.plain_result("下载仅管理员可用。")
             return
-        ref = strip_command(event.message_str, _SUB_DOWNLOAD).strip()
         try:
             book = self.service.resolve_book(event.unified_msg_origin, ref)
         except ZlibError as e:
             yield event.plain_result(e.message)
             return
+        started = time.monotonic()
         yield event.plain_result(f"正在下载《{book.title or book.id}》，请稍候…")
         try:
             done = await self.service.download(book)
@@ -238,7 +275,8 @@ class ZLibraryAssistantPlugin(Star):
             return
         yield event.chain_result([File(name=done.filename, file=str(done.path))])
         yield event.plain_result(
-            f"已发送 {done.filename}（{done.size / 1024 / 1024:.1f} MB），"
+            f"已发送 {done.filename}（{done.size / 1024 / 1024:.1f} MB，"
+            f"耗时 {time.monotonic() - started:.1f} 秒），"
             f"账号 {done.account_name} 今日剩余 {done.downloads_left} 次"
         )
 

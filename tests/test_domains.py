@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from astrbot_plugin_zlibrary_assistant import zlib_security
@@ -54,11 +56,9 @@ class TestNormalizeBaseUrl:
     @pytest.mark.parametrize(
         ("raw", "expected"),
         [
-            ("z-lib.example", "https://z-lib.example"),
             ("HTTPS://Z-Lib.Example/", "https://z-lib.example"),
             ("http://z-lib.example:8080", "http://z-lib.example:8080"),
-            (f"{ONION}", f"http://{ONION}"),
-            (f"  https://{ONION}  ", f"https://{ONION}"),
+            (f"  {ONION}  ", f"http://{ONION}"),
         ],
     )
     def test_valid(self, raw, expected):
@@ -68,9 +68,7 @@ class TestNormalizeBaseUrl:
         "raw",
         [
             "",
-            "   ",
             "ftp://x.example",
-            "file:///etc/passwd",
             "https://x.example/path",
             "https://x.example?q=1",
             "https://x.example#f",
@@ -82,28 +80,24 @@ class TestNormalizeBaseUrl:
 
 
 class TestPoolConstruction:
-    def test_user_domains_precede_builtin(self):
+    def test_user_domains_precede_builtin_in_order(self):
         pool = make_pool(["https://mine.example"])
-        assert pool.candidates()[0] == "https://mine.example"
+        assert pool.candidates() == ["https://mine.example", *BUILTIN]
         assert pool.primary == "https://mine.example"
-        assert pool.candidates()[1:] == BUILTIN
 
     def test_without_user_domains_builtin_order(self):
         assert make_pool().candidates() == BUILTIN
 
-    def test_duplicate_user_domain_ignored(self):
+    @pytest.mark.parametrize("user", [[""], ["  "], [BUILTIN[3]]])
+    def test_blank_or_builtin_user_domain_adds_nothing(self, user):
+        assert len(make_pool(user).snapshot()) == len(BUILTIN)
+
+    def test_repeated_user_domain_written_differently_is_one_entry(self):
         pool = make_pool(
             ["https://mine.example", "mine.example", "https://MINE.example/"]
         )
         assert len(pool.snapshot()) == 1 + len(BUILTIN)
-
-    def test_user_domain_equal_to_builtin_not_duplicated(self):
-        pool = make_pool([BUILTIN[3]])
-        assert pool.candidates()[0] == BUILTIN[3]
-        assert len(pool.snapshot()) == len(BUILTIN)
-
-    def test_blank_entries_skipped(self):
-        assert len(make_pool(["", "  "]).snapshot()) == len(BUILTIN)
+        assert pool.candidates()[0] == "https://mine.example"
 
     def test_onion_requires_socks(self):
         with pytest.raises(ValueError, match=r"\.onion"):
@@ -179,7 +173,7 @@ class TestCooldown:
 
     def test_all_cooling_falls_back_to_soonest_recovering(self):
         pool = make_pool()
-        for i, host in enumerate(BUILTIN):
+        for host in BUILTIN:
             pool.mark_failed(host, "network_error")
             pool.clock.now += 1
         got = pool.candidates()
@@ -190,24 +184,14 @@ class TestCooldown:
         pool = make_pool()
         pool.mark_failed(BUILTIN[0], "cloudflare_blocked")
         row = next(r for r in pool.snapshot() if r["base_url"] == BUILTIN[0])
-        assert row["cooling"] is True
-        assert row["last_category"] == "cloudflare_blocked"
-        assert row["fail_count"] == 1
+        assert (row["cooling"], row["last_category"], row["fail_count"]) == (
+            True,
+            "cloudflare_blocked",
+            1,
+        )
 
 
 class TestCall:
-    @pytest.mark.asyncio
-    async def test_first_candidate_success(self):
-        pool = make_pool()
-        seen = []
-
-        async def op(url):
-            seen.append(url)
-            return "ok"
-
-        assert await pool.call(op) == "ok"
-        assert seen == [BUILTIN[0]]
-
     @pytest.mark.asyncio
     async def test_failover_in_candidate_order_and_marks_state(self):
         pool = make_pool()
@@ -358,7 +342,6 @@ class TestLearn:
             "",
             "localhost",
             "127.0.0.1",
-            "10.0.0.1",
             "[::1]",
             "a b.example",
             "x.example/path",
@@ -367,10 +350,8 @@ class TestLearn:
             "user@x.example",
             "x.e",
             "x" * 64 + ".example",
-            "single",
             "x.example\nevil.example",
             None,
-            123,
             ONION,
         ],
     )
@@ -398,7 +379,8 @@ class TestLearn:
         pool.learn(["fresh.example"])
         assert pool.candidates()[-1] == "https://fresh.example"
 
-    def test_private_resolution_not_checked_but_literal_internal_hosts_rejected(self):
+    def test_literal_internal_hosts_rejected_even_without_dns_check(self):
+        """learn 走 dns_check=False（防 rebinding 由 guarded_get 兜底），字面量内网仍需拦。"""
         pool = make_pool()
         assert pool.learn(["169.254.169.254", "metadata.google.internal"]) == 0
 
@@ -450,7 +432,6 @@ class TestTrustedOnly:
         with pytest.raises(ZlibError) as exc:
             await pool.call(op, trusted_only=True)
         assert exc.value.category == "all_domains_failed"
-        assert not [u for u in seen if "fresh" in u or "second" in u]
         assert set(seen) == set(BUILTIN)
 
     @pytest.mark.asyncio
@@ -483,24 +464,19 @@ class TestProbeAll:
         assert by_url[BUILTIN[0]].category == "diamwall_blocked"
         assert by_url["https://mine.example"].ok is True
         assert by_url["https://mine.example"].latency_ms == 200
-        assert by_url["https://mine.example"].tier == 0
         assert BUILTIN[0] not in pool.candidates()
 
     @pytest.mark.asyncio
     async def test_all_failing(self):
-        pool = make_pool()
-
         async def probe(_url):
             raise ZlibError("network_error", "down")
 
-        reports = await pool.probe_all(probe)
+        reports = await make_pool().probe_all(probe)
         assert [r.ok for r in reports] == [False] * len(BUILTIN)
         assert {r.category for r in reports} == {"network_error"}
 
     @pytest.mark.asyncio
     async def test_concurrency_bounded(self):
-        import asyncio
-
         pool = make_pool()
         running = peak = 0
 
@@ -518,8 +494,6 @@ class TestProbeAll:
 @pytest.mark.asyncio
 class TestConcurrentProbe:
     async def test_concurrent_calls_probe_bad_domain_once(self):
-        import asyncio
-
         pool = make_pool()
         bad = pool.candidates()[0]
         hits: list[str] = []

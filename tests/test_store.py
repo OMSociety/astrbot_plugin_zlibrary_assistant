@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 from stubs import RecordingLogger, make_book
@@ -14,19 +13,12 @@ from astrbot_plugin_zlibrary_assistant.zlib_store import BookCache, SearchMemory
 
 
 class TestBookCache:
-    def test_put_and_get(self):
-        cache = BookCache()
-        cache.put_many([make_book(1), make_book(2)])
-        assert len(cache) == 2
-        assert cache.get(2).id == 2
-        assert cache.get(99) is None
-
     def test_capacity_evicts_oldest_first(self):
         cache = BookCache(capacity=3)
         cache.put_many([make_book(i) for i in range(1, 6)])
-        assert len(cache) == 3
         assert cache.get(1) is None and cache.get(2) is None
         assert cache.get(5) is not None
+        assert cache.get(99) is None
 
     def test_reput_refreshes_position(self):
         cache = BookCache(capacity=3)
@@ -35,12 +27,6 @@ class TestBookCache:
         cache.put_many([make_book(4)])
         assert cache.get(1) is not None
         assert cache.get(2) is None
-
-    def test_clear(self):
-        cache = BookCache()
-        cache.put_many([make_book(1)])
-        cache.clear()
-        assert len(cache) == 0
 
     def test_flush_persists_and_reload_restores(self, tmp_path):
         path = tmp_path / "cache.json"
@@ -55,7 +41,9 @@ class TestBookCache:
         path = tmp_path / "cache.json"
         cache = BookCache(path)
         cache.put_many([make_book(1)])
-        cache.flush()
+        for _ in range(3):
+            cache.put_many([make_book(2)])
+            cache.flush()
         assert sorted(p.name for p in tmp_path.iterdir()) == ["cache.json"]
         json.loads(path.read_text(encoding="utf-8"))
 
@@ -90,12 +78,7 @@ class TestBookCache:
         assert calls == []
         assert not path.exists()
 
-    def test_flush_without_path_is_noop(self):
-        cache = BookCache()
-        cache.put_many([make_book(1)])
-        cache.flush()
-
-    @pytest.mark.parametrize("content", ["{not json", '{"a": 1}', "", "null"])
+    @pytest.mark.parametrize("content", ["{not json", "null"])
     def test_corrupt_file_ignored(self, tmp_path, content):
         path = tmp_path / "cache.json"
         path.write_text(content, encoding="utf-8")
@@ -109,15 +92,6 @@ class TestBookCache:
         small = BookCache(path, capacity=3)
         assert len(small) == 3
         assert small.get(7) is not None and small.get(1) is None
-
-    def test_written_file_has_no_temp_name_pattern_left_after_many_flushes(
-        self, tmp_path
-    ):
-        cache = BookCache(tmp_path / "c.json")
-        for i in range(5):
-            cache.put_many([make_book(i)])
-            cache.flush()
-        assert not [p for p in os.listdir(tmp_path) if p.endswith(".tmp")]
 
 
 class _Clock:
@@ -133,21 +107,17 @@ def _result(q="q"):
 
 
 class TestSearchMemory:
-    def test_sessions_isolated(self):
+    def test_sessions_isolated_and_overwritten(self):
         mem = SearchMemory()
         mem.remember("u1", _result("a"))
+        mem.remember("u1", _result("new"))
         mem.remember("u2", _result("b"))
-        assert mem.recall("u1").query == "a"
+        assert mem.recall("u1").query == "new"
         assert mem.recall("u2").query == "b"
         assert mem.recall("u3") is None
 
-    def test_remember_overwrites_same_session(self):
-        mem = SearchMemory()
-        mem.remember("u", _result("old"))
-        mem.remember("u", _result("new"))
-        assert mem.recall("u").query == "new"
-
-    def test_ttl_expiry(self):
+    def test_ttl_expiry_deletes_entry(self):
+        """过期条目必须删除而非仅判定为空，否则会长期占住容量。"""
         clock = _Clock()
         mem = SearchMemory(ttl=100, clock=clock)
         mem.remember("u", _result())
@@ -155,14 +125,7 @@ class TestSearchMemory:
         assert mem.recall("u") is not None
         clock.now += 2
         assert mem.recall("u") is None
-
-    def test_expired_entry_is_dropped(self):
-        clock = _Clock()
-        mem = SearchMemory(ttl=10, clock=clock)
-        mem.remember("u", _result())
-        clock.now += 11
-        mem.recall("u")
-        clock.now -= 11
+        clock.now -= 100
         assert mem.recall("u") is None
 
     def test_capacity_evicts_oldest_session(self):

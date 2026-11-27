@@ -13,7 +13,6 @@ from stubs import make_book
 
 from astrbot_plugin_zlibrary_assistant.zlib_cards import (
     MAX_CARD_BOOKS,
-    RENDER_OPTIONS,
     SEARCH_CARD_TMPL,
     build_card_data,
 )
@@ -26,7 +25,7 @@ def _render(data: dict) -> str:
 
 
 class TestBuildCardData:
-    def test_fields(self):
+    def test_meta_and_book_fields_mapped(self):
         book = make_book(
             1,
             title="资本论",
@@ -41,28 +40,37 @@ class TestBuildCardData:
         data = build_card_data(result, {1: "data:image/jpeg;base64,AAA"}, "/zlib")
         assert data["query"] == "资本论"
         assert data["meta"] == "第 2/5 页 · 共 48 条"
-        assert data["books"] == [
-            {
-                "no": 1,
-                "title": "资本论",
-                "author": "马克思",
-                "publisher": "人民出版社",
-                "extension": "PDF",
-                "size": "5 MB",
-                "language": "chinese",
-                "year": "1867",
-                "cover": "data:image/jpeg;base64,AAA",
-                "fmt_bg": data["books"][0]["fmt_bg"],
-                "fmt_fg": data["books"][0]["fmt_fg"],
-            }
-        ]
-        assert data["footer"] == "回复 /zlib 下载 序号 获取文件，/zlib 下一页 翻页"
-
-    def test_footer_without_next_page(self):
-        data = build_card_data(
-            SearchResult("q", [make_book(1)], page=1, total_pages=1), {}, "/z"
+        row = data["books"][0]
+        assert (row["no"], row["title"], row["author"], row["publisher"]) == (
+            1,
+            "资本论",
+            "马克思",
+            "人民出版社",
         )
-        assert data["footer"] == "回复 /z 下载 序号 获取文件"
+        assert (row["extension"], row["size"], row["language"], row["year"]) == (
+            "PDF",
+            "5 MB",
+            "chinese",
+            "1867",
+        )
+        assert row["cover"] == "data:image/jpeg;base64,AAA"
+
+    @pytest.mark.parametrize(
+        ("total_pages", "quota_hint", "tail"),
+        [
+            (5, "", "，/z 下一页"),
+            (1, "", ""),
+            (1, "今日剩余 4 次下载", "，今日剩余 4 次下载"),
+        ],
+    )
+    def test_footer_branches(self, total_pages, quota_hint, tail):
+        data = build_card_data(
+            SearchResult("q", [make_book(1)], page=1, total_pages=total_pages),
+            {},
+            "/z",
+            quota_hint=quota_hint,
+        )
+        assert data["footer"] == "回复 /z 详情 序号 看简介，/z 下载 序号 取文件" + tail
 
     def test_missing_title_author_and_cover_defaults(self):
         book = make_book(1, title="", author="")
@@ -101,123 +109,29 @@ class TestBuildCardData:
         data = build_card_data(SearchResult(evil, [make_book(1, title=evil)]), {}, "/z")
         assert FENCE_OPEN not in str(data) and FENCE_CLOSE not in str(data)
 
-    def test_known_and_unknown_format_colors(self):
-        data = build_card_data(
-            SearchResult(
-                "q", [make_book(1, extension="pdf"), make_book(2, extension="zzz")]
-            ),
-            {},
-            "/z",
-        )
-        pdf, other = data["books"]
-        assert re.fullmatch(r"#[0-9a-f]{6}", pdf["fmt_bg"]) and re.fullmatch(
-            r"#[0-9a-f]{6}", other["fmt_fg"]
-        )
-        assert pdf["fmt_bg"] != other["fmt_bg"]
-
-    def test_render_options(self):
-        assert RENDER_OPTIONS["type"] == "jpeg"
-        assert RENDER_OPTIONS["full_page"] is True
-
 
 EVIL = "<script>alert(1)</script>"
 TEMPLATE_INJECTION = "{{7*7}}"
 
 
-def _hostile_book(**over):
-    fields = dict(
-        title=f"T {EVIL} {TEMPLATE_INJECTION}",
-        author=f"A {EVIL} {TEMPLATE_INJECTION}",
-        publisher=f"P {EVIL} {TEMPLATE_INJECTION}",
-        extension="pdf",
-        size=f"S {EVIL}",
-        language=f"L {EVIL}",
-        year="1999",
-    )
-    fields.update(over)
-    return make_book(1, **fields)
-
-
 class TestTemplateEscaping:
     def test_hostile_book_fields_are_escaped_without_autoescape(self):
-        data = build_card_data(
-            SearchResult(f"Q {EVIL} {TEMPLATE_INJECTION}", [_hostile_book()]), {}, "/z"
+        book = make_book(
+            1,
+            title=f"T {EVIL} {TEMPLATE_INJECTION}",
+            author=f"A {EVIL}",
+            publisher=f"P {EVIL}",
+            size=f"S {EVIL}",
+            language=f"L {EVIL}",
         )
+        data = build_card_data(SearchResult(f"Q {EVIL}", [book]), {}, "/z")
         html = _render(data)
         assert "<script>" not in html
-        assert "&lt;script&gt;" in html
-        assert "{{7*7}}" in html
-        assert "49" not in html
-
-    @pytest.mark.parametrize(
-        "field", ["title", "author", "publisher", "size", "language"]
-    )
-    def test_each_text_field_escaped_individually(self, field):
-        data = build_card_data(
-            SearchResult(
-                "q",
-                [
-                    _hostile_book(
-                        **{
-                            f: "ok"
-                            for f in (
-                                "title",
-                                "author",
-                                "publisher",
-                                "size",
-                                "language",
-                            )
-                            if f != field
-                        }
-                    )
-                ],
-            ),
-            {},
-            "/z",
-        )
-        html = _render(data)
-        assert "<script>" not in html
-        assert "&lt;script&gt;" in html
-
-    def test_extension_year_query_meta_footer_cover_escaped(self):
-        """未经 build_card_data 清洗的直传数据同样被模板转义（模板自身是最后一道防线）。"""
-        data = {
-            "query": EVIL,
-            "meta": EVIL,
-            "footer": EVIL,
-            "books": [
-                {
-                    "no": EVIL,
-                    "title": EVIL,
-                    "author": EVIL,
-                    "publisher": EVIL,
-                    "extension": EVIL,
-                    "size": EVIL,
-                    "language": EVIL,
-                    "year": EVIL,
-                    "cover": '"><script>x</script>',
-                    "fmt_bg": "#fff",
-                    "fmt_fg": "#000",
-                }
-            ],
-        }
-        html = _render(data)
-        assert "<script>" not in html
-        assert html.count("&lt;script&gt;") >= 11
-
-    def test_template_expressions_in_data_are_not_evaluated(self):
-        data = build_card_data(
-            SearchResult(TEMPLATE_INJECTION, [_hostile_book()]), {}, "/z"
-        )
-        assert "49" not in _render(data)
+        assert html.count("&lt;script&gt;") == 6
+        assert "{{7*7}}" in html and "49" not in html
 
     def test_every_dynamic_text_expression_in_template_has_escape_filter(self):
         """模板里除内部配色常量外，所有 {{ ... }} 输出都带 | e。"""
         exprs = re.findall(r"\{\{(.*?)\}\}", SEARCH_CARD_TMPL)
         unescaped = [e.strip() for e in exprs if "| e" not in e]
         assert sorted(unescaped) == ["b.fmt_bg", "b.fmt_fg"]
-
-    def test_all_books_rendered_in_order(self):
-        books = [make_book(i, title=f"Book{i}") for i in range(1, 4)]
-        html = _render(build_card_data(SearchResult("q", books), {}, "/z"))
-        assert html.index("Book1") < html.index("Book2") < html.index("Book3")

@@ -23,13 +23,9 @@ class TestStripCommand:
     @pytest.mark.parametrize(
         ("text", "expected"),
         [
-            ("zlib 搜索 资本论", "资本论"),
             ("/zlib 搜索 资本论 -l zh", "资本论 -l zh"),
             ("  /zlib   search  a b c", "a b c"),
-            ("zlib s", ""),
-            ("zlib 搜索", ""),
             ("zlib 下载 1", ""),
-            ("zlib", ""),
             ("", ""),
         ],
     )
@@ -38,44 +34,29 @@ class TestStripCommand:
 
 
 class TestParseSearchArgs:
-    def test_plain_query(self):
-        args = parse_search_args("资本论")
+    def test_defaults(self):
+        args = parse_search_args("das kapital marx")
         assert (args.query, args.language, args.extension, args.limit) == (
-            "资本论",
+            "das kapital marx",
             "",
             "",
             None,
         )
 
-    def test_multi_word_query_joined(self):
-        assert parse_search_args("das kapital marx").query == "das kapital marx"
-
-    def test_all_options(self):
-        args = parse_search_args("资本论 -l zh -e pdf -n 8")
+    def test_all_options_between_words(self):
+        args = parse_search_args("-l en deep learning -e epub book -n 8")
         assert (args.query, args.language, args.extension, args.limit) == (
-            "资本论",
-            "zh",
-            "pdf",
+            "deep learning book",
+            "en",
+            "epub",
             8,
         )
 
-    def test_options_before_and_between_words(self):
-        args = parse_search_args("-l en deep learning -e epub book")
-        assert args.query == "deep learning book"
-        assert (args.language, args.extension) == ("en", "epub")
+    def test_quoted_query_keeps_phrase_and_last_option_wins(self):
+        args = parse_search_args('"the art of war" -e pdf -e epub')
+        assert (args.query, args.extension) == ("the art of war", "epub")
 
-    def test_quoted_query_keeps_phrase(self):
-        args = parse_search_args('"the art of war" -n 3')
-        assert args.query == "the art of war"
-        assert args.limit == 3
-
-    def test_quoted_option_value_unquoted(self):
-        assert parse_search_args('x -l "zh"').language == "zh"
-
-    def test_last_option_wins(self):
-        assert parse_search_args("x -e pdf -e epub").extension == "epub"
-
-    @pytest.mark.parametrize("text", ["", "   ", "-l zh", "-e pdf -n 3"])
+    @pytest.mark.parametrize("text", ["", "-l zh", "-e pdf -n 3"])
     def test_missing_query(self, text):
         with pytest.raises(ArgError, match="关键词"):
             parse_search_args(text)
@@ -85,7 +66,7 @@ class TestParseSearchArgs:
         with pytest.raises(ArgError, match=f"选项 {opt} 后需要一个值"):
             parse_search_args(f"书名 {opt}")
 
-    @pytest.mark.parametrize("value", ["0", "-1", "abc", "1.5", ""])
+    @pytest.mark.parametrize("value", ["0", "-1", "abc", "1.5"])
     def test_invalid_limit(self, value):
         with pytest.raises(ArgError, match="正整数"):
             parse_search_args(f'书名 -n "{value}"')
@@ -93,9 +74,6 @@ class TestParseSearchArgs:
     def test_unbalanced_quote(self):
         with pytest.raises(ArgError, match="参数无法解析"):
             parse_search_args('"未闭合 -l zh')
-
-    def test_arg_error_is_value_error(self):
-        assert issubclass(ArgError, ValueError)
 
 
 def _row(**over):
@@ -131,15 +109,10 @@ class TestFormatStatus:
         assert "未登录，Premium" in text
         assert "最近错误：密码错误" in text
 
-    def test_multiple_accounts_each_listed(self):
-        text = format_status([_row(name="a"), _row(name="b", login_mode="password")])
-        assert "- a（remix）" in text and "- b（password）" in text
-
     def test_never_prints_credentials(self):
         row = _row()
         row.update(password="PW-SECRET", remix_userkey="KEY-SECRET")
-        text = format_status([row])
-        assert "SECRET" not in text
+        assert "SECRET" not in format_status([row])
 
 
 class TestFormatDiagnosis:

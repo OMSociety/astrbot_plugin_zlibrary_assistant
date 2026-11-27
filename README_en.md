@@ -47,7 +47,9 @@ Command group `/zlib`, alias `/zl`. The sub-commands also accept Chinese names (
 |---------|-------------|
 | `/zlib search keywords [-l language] [-e extension] [-n count]` | Search, e.g. `/zlib search Das Kapital -l en -e pdf`. Aliases `s`, `search` |
 | `/zlib next` / `/zlib prev` | Page through the latest search. Aliases `n`, `p` |
+| `/zlib detail index-or-id` | Full information for one book: publisher, pages, series, categories and description. Aliases `d`, `detail` |
 | `/zlib download index-or-id` | The index refers to the latest results of the current session; a number larger than the page size is treated as a book id. Aliases `dl`, `download` |
+| `/zlib 3` | Shorthand for `/zlib download 3` (`/zl 3` works too) |
 | `/zlib status` | Account login state and today's quota (admins only) |
 | `/zlib diag` | Probes every mirror for reachability and latency and checks account logins (admins only) |
 | `/zlib help` | Command help |
@@ -60,8 +62,8 @@ The language option accepts `zh`, `en`, `chinese`, `english` and similar. Search
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `zlib_search_books` | `query` (required), `limit`, `page`, `language`, `extension` | Search; returns the card-image path and a text list with ids |
-| `zlib_download_book` | `book_id` (required) | Download by search-result id; spends quota; called only when the user explicitly asks |
+| `zlib_search_books` | `query` (required), `limit`, `page`, `language`, `extension` | Search; the plugin sends the result card itself and hands the model a text list with ids and descriptions |
+| `zlib_download_book` | `book_id` (required) | Download by search-result id; spends quota; called only when the user explicitly asks; the plugin sends the file |
 | `zlib_get_status` | none | Account pool status; admin sessions only |
 
 ```
@@ -71,7 +73,7 @@ User: Download the first one
 Model calls: zlib_download_book(book_id=<id from the search results>)
 ```
 
-Fence markers are stripped from book fields and the fields are truncated before they enter a tool result, reducing the risk of instructions hidden in a title. After the tool returns a file path, the model sends it with `send_message_to_user` (`type=file`).
+Fence markers are stripped from book fields and the fields are truncated before they enter a tool result, reducing the risk of instructions hidden in a title. Messages a tool call needs to deliver (the result card, the downloaded file) are sent by the plugin itself, so the model only describes the outcome and never handles local paths.
 
 ---
 
@@ -181,11 +183,16 @@ Install and start Tor with the SOCKS port listening on localhost only, and set `
 |--------|----------------|
 | `zlib_transport.py` | aiohttp transport: headers, manual same-origin redirects and cookie merging, response classification, bounded reads, guarded download GET (SSRF and peer verification) |
 | `zlib_domains.py` | Mirror pool: user / built-in / learned tiers, cooldowns, failover, batch probing |
-| `zlib_client.py` | E-API client: account pool login, search, download links, cover fetching, status and diagnosis |
+| `zlib_client.py` | E-API client: account pool login, search, download links, cover fetching, streaming downloads, status and diagnosis |
 | `zlib_service.py` | Business layer shared by commands and tools: search, card, index resolution, saving downloads |
 | `zlib_cards.py` | Card HTML template and render data (every book field explicitly escaped) |
+| `zlib_models.py` | Book, search-result and account models, plus the book-line and detail text handed to the model |
 | `zlib_store.py` | Persistent book cache and per-session search memory |
 | `zlib_format.py` | Command argument parsing and text formatting |
+| `zlib_text.py` | Mojibake repair, filename sanitizing, description cleaning and capping, cover resizing |
+| `zlib_security.py` | SSRF checks: private-address detection, second DNS check, onion address rules |
+| `zlib_errors.py` | Error categories and which ones trigger failover |
+| `zlib_paths.py` | Plugin data directory |
 | `tools/` | The three LLM tools |
 
 Downloads are saved under `<data>/plugin_data/zlibrary_assistant/books/` and kept for 7 days.
@@ -218,17 +225,7 @@ AstrBot's text-to-image prefers cloud rendering and falls back to local renderin
 2. In a running container: `docker exec -it <container> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"`
 3. Copy any CJK font to `data/font.ttf`: `docker cp msyh.ttc <container>:/AstrBot/data/font.ttf`
 
-### Q6: The LLM finished a download but cannot send the file ("Sandbox runtime is disabled by configuration")?
-
-`send_message_to_user` sends local files through AstrBot's `computer_use_runtime`, which defaults to `none`. In the WebUI under Config → Provider settings set `computer_use_runtime` to `local` (and `computer_use_require_admin` to `false` if needed), or write to `data/config/astrbot_config.json`:
-
-```json
-{"provider_settings": {"computer_use_runtime": "local", "computer_use_require_admin": false}}
-```
-
-Restart AstrBot afterwards. The `/zlib download` command sends the file directly and is not affected.
-
-### Q7: Slow searches or placeholder covers in Docker?
+### Q6: Slow searches or placeholder covers in Docker?
 
 A container is its own network: `http://127.0.0.1:port` points at the container itself. Set `proxy` to an address the container can reach: `http://host.docker.internal:port` on Docker Desktop, or the host's LAN IP on Linux with "allow LAN" enabled in the proxy software; with authentication use `http://user:pass@IP:port`. If cloud text-to-image is unreachable, rendering has a 25-second timeout and falls back to a text list; if time is still tight, raise `agent_runner.config.misc.tool_call_timeout`.
 

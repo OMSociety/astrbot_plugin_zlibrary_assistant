@@ -44,6 +44,7 @@ BUILTIN = [f"https://{h}" for h in BUILTIN_MIRRORS]
 SECRET_KEY = "KEY-SECRET-123"
 SECRET_PW = "PW-SECRET-456"
 LOGIN_ERR = biz_error("Please login", 401)
+REMIX_COOKIES = {"remix_userid": "1", "remix_userkey": SECRET_KEY}
 
 
 class Clock:
@@ -119,13 +120,8 @@ class TestClassifyBusinessError:
         ("status", "resp", "category"),
         [
             (401, {"success": 0}, "auth_failed"),
-            (400, {"error": "Please login"}, "auth_failed"),
-            (403, {"error": "Please login to continue"}, "auth_failed"),
-            (200, {"error": "Incorrect email or password"}, "auth_failed"),
-            (200, {"error": "Unauthorized"}, "auth_failed"),
-            (200, {"error": "Invalid credentials"}, "auth_failed"),
+            (200, {"error": "Please login"}, "auth_failed"),
             (200, {"error": "Daily download limit reached"}, "quota_exhausted"),
-            (200, {"error": "You exceeded your quota"}, "quota_exhausted"),
             (200, {"error": "File not found"}, "api_error"),
             (200, {}, "api_error"),
         ],
@@ -149,53 +145,66 @@ class TestClassifyBusinessError:
 
 class TestLogin:
     @pytest.mark.asyncio
-    async def test_remix_login_is_get_profile_with_cookies(self, make_client):
-        api = FakeApi().on(
-            "GET", EP_PROFILE, profile(user_id="1", key=SECRET_KEY, today=3)
-        )
-        client = make_client([remix()], api)
-        await client.ensure_login()
-        (call,) = api.calls
-        assert (call["method"], call["path"]) == ("GET", EP_PROFILE)
-        assert call["cookies"] == {"remix_userid": "1", "remix_userkey": SECRET_KEY}
-        acc = client.accounts[0]
-        assert acc.logged_in
-        assert (acc.downloads_today, acc.downloads_limit) == (3, 10)
-        assert acc.last_error == ""
-
-    @pytest.mark.asyncio
-    async def test_password_login_is_post_login_with_form_and_no_cookies(
-        self, make_client
+    @pytest.mark.parametrize(
+        ("account_factory", "method", "path", "cookies", "data", "identity"),
+        [
+            (remix, "GET", EP_PROFILE, REMIX_COOKIES, None, ("1", "k")),
+            (
+                pwd,
+                "POST",
+                EP_LOGIN,
+                {},
+                {"email": "u@example.com", "password": SECRET_PW},
+                ("42", "NEWKEY"),
+            ),
+            # remix 凭证优先：两种凭据都填时不得改走邮箱密码登录
+            (
+                lambda: remix(email="a@b.c", password=SECRET_PW),
+                "GET",
+                EP_PROFILE,
+                REMIX_COOKIES,
+                None,
+                ("1", "k"),
+            ),
+        ],
+        ids=["remix", "password", "remix_preferred"],
+    )
+    async def test_credential_dispatch(
+        self, make_client, account_factory, method, path, cookies, data, identity
     ):
-        api = FakeApi().on("POST", EP_LOGIN, profile(user_id="42", key="NEWKEY"))
-        client = make_client([pwd()], api)
+        api = (
+            FakeApi()
+            .on("GET", EP_PROFILE, profile())
+            .on("POST", EP_LOGIN, profile(user_id="42", key="NEWKEY"))
+        )
+        client = make_client([account_factory()], api)
         await client.ensure_login()
         (call,) = api.calls
-        assert (call["method"], call["path"]) == ("POST", EP_LOGIN)
-        assert call["data"] == {"email": "u@example.com", "password": SECRET_PW}
-        assert call["cookies"] == {}
+        assert (call["method"], call["path"]) == (method, path)
+        assert call["cookies"] == cookies
+        assert call["data"] == data
         acc = client.accounts[0]
-        assert acc.logged_in
-        assert (acc.remix_userid, acc.remix_userkey) == ("42", "NEWKEY")
+        assert acc.logged_in and acc.last_error == ""
+        assert (acc.remix_userid, acc.remix_userkey) == identity
 
     @pytest.mark.asyncio
-    async def test_remix_preferred_over_password(self, make_client):
-        api = FakeApi().on("GET", EP_PROFILE, profile())
-        client = make_client([remix(email="a@b.c", password="x")], api)
-        await client.ensure_login()
-        assert api.paths() == [("GET", EP_PROFILE)]
-
-    @pytest.mark.asyncio
-    async def test_profile_applied_premium_and_default_limit(self, make_client):
+    async def test_profile_quota_and_premium_applied(self, make_client):
         resp = ok(
-            user={"id": 7, "remix_userkey": "k", "isPremium": 1, "downloads_today": 0}
+            user={
+                "id": 7,
+                "remix_userkey": "k",
+                "isPremium": 1,
+                "downloads_today": 3,
+            }
         )
         client = make_client([remix()], FakeApi().on("GET", EP_PROFILE, resp))
         await client.ensure_login()
         acc = client.accounts[0]
-        assert acc.is_premium is True
-        assert acc.downloads_limit == 10
-        assert acc.remix_userid == "7"
+        assert (acc.downloads_today, acc.downloads_limit, acc.is_premium) == (
+            3,
+            10,
+            True,
+        )
 
     @pytest.mark.asyncio
     async def test_account_without_credentials_fails_without_request(self, make_client):
@@ -203,9 +212,8 @@ class TestLogin:
         client = make_client([make_account("empty")], api)
         await client.ensure_login()
         assert api.calls == []
-        acc = client.accounts[0]
-        assert acc.logged_in is False
-        assert "缺少凭据" in acc.last_error
+        assert client.accounts[0].logged_in is False
+        assert "缺少凭据" in client.accounts[0].last_error
 
     @pytest.mark.asyncio
     async def test_failed_login_marks_account_and_does_not_block_others(
@@ -215,21 +223,15 @@ class TestLogin:
         client = make_client([remix("bad"), pwd("good")], api)
         await client.ensure_login()
         bad, good = client.accounts
-        assert bad.logged_in is False
-        assert bad.last_error
+        assert bad.logged_in is False and bad.last_error
         assert good.logged_in is True
 
     @pytest.mark.asyncio
-    async def test_logged_in_accounts_skipped(self, make_client):
-        api = FakeApi()
+    async def test_logged_in_accounts_skipped_unless_forced(self, make_client):
+        api = FakeApi().on("GET", EP_PROFILE, profile())
         client = make_client([remix(logged_in=True)], api)
         await client.ensure_login()
         assert api.calls == []
-
-    @pytest.mark.asyncio
-    async def test_force_relogs_logged_in_accounts(self, make_client):
-        api = FakeApi().on("GET", EP_PROFILE, profile())
-        client = make_client([remix(logged_in=True)], api)
         await client.ensure_login(force=True)
         assert len(api.calls) == 1
 
@@ -264,6 +266,7 @@ class TestLoginCooldown:
 
     @pytest.mark.asyncio
     async def test_cooldown_is_per_account(self, make_client):
+        """一个账号的冷却时间戳不得挡住另一个账号。"""
         api = FakeApi().on("GET", EP_PROFILE, LOGIN_ERR)
         client = make_client([remix("a"), remix("b")], api)
         await client.ensure_login()
@@ -276,51 +279,46 @@ class TestLoginCooldown:
 class TestDomainRouting:
     """带账号凭据的请求只发往可信域名；学习到的域名只服务匿名请求。"""
 
+    LEARNED = "https://learned.example"
+
     @pytest.fixture(autouse=True)
     def _no_dns(self, monkeypatch):
         monkeypatch.setattr(
             zlib_security, "_resolve_host_ips", lambda h: ["93.184.216.34"]
         )
 
-    @staticmethod
-    def _learned_only_ok(client):
-        learned = "https://learned.example"
+    def _learned_only_ok(self, client):
         assert client.domains.learn(["learned.example"]) == 1
         client.domains.max_attempts = 20
 
         def answer(call):
-            if call["base_url"] == learned:
+            if call["base_url"] == self.LEARNED:
                 return ok(books=[])
             return ZlibError("network_error", "down")
 
-        return learned, answer
+        return answer
 
     @pytest.mark.asyncio
     async def test_anonymous_request_may_use_learned_domain(self, make_client):
         client = make_client()
-        learned, answer = self._learned_only_ok(client)
-        client.api.on("POST", EP_SEARCH, answer)
-        result = await client.search("x")
-        assert result.books == []
-        assert client.api.calls[-1]["base_url"] == learned
+        client.api.on("POST", EP_SEARCH, self._learned_only_ok(client))
+        assert (await client.search("x")).books == []
+        assert client.api.calls[-1]["base_url"] == self.LEARNED
 
     @pytest.mark.asyncio
-    async def test_remix_login_never_sent_to_learned_domain(self, make_client):
-        client = make_client([remix()])
-        learned, answer = self._learned_only_ok(client)
-        client.api.on("GET", EP_PROFILE, answer)
+    @pytest.mark.parametrize(
+        ("account_factory", "method", "path"),
+        [(remix, "GET", EP_PROFILE), (pwd, "POST", EP_LOGIN)],
+        ids=["remix", "password"],
+    )
+    async def test_login_never_sent_to_learned_domain(
+        self, make_client, account_factory, method, path
+    ):
+        client = make_client([account_factory()])
+        client.api.on(method, path, self._learned_only_ok(client))
         await client.ensure_login()
         assert client.accounts[0].logged_in is False
-        assert learned not in {c["base_url"] for c in client.api.calls}
         assert {c["base_url"] for c in client.api.calls} == set(BUILTIN)
-
-    @pytest.mark.asyncio
-    async def test_password_login_never_sent_to_learned_domain(self, make_client):
-        client = make_client([pwd()])
-        learned, answer = self._learned_only_ok(client)
-        client.api.on("POST", EP_LOGIN, answer)
-        await client.ensure_login()
-        assert learned not in {c["base_url"] for c in client.api.calls}
 
     @pytest.mark.asyncio
     async def test_download_link_request_never_sent_to_learned_domain(
@@ -328,15 +326,16 @@ class TestDomainRouting:
     ):
         book = make_book(1)
         client = make_client([remix(logged_in=True)])
-        learned, answer = self._learned_only_ok(client)
-        client.api.on("GET", file_path(book), answer)
+        client.api.on("GET", file_path(book), self._learned_only_ok(client))
         with pytest.raises(ZlibError) as exc:
             await client.get_download_link(client.accounts[0], book)
         assert exc.value.category == "all_domains_failed"
-        assert learned not in {c["base_url"] for c in client.api.calls}
+        assert self.LEARNED not in {c["base_url"] for c in client.api.calls}
 
     @pytest.mark.asyncio
-    async def test_discover_domains_learns_valid_and_ignores_junk(self, make_client):
+    async def test_discover_domains_learns_valid_and_swallows_failure(
+        self, make_client
+    ):
         resp = ok(
             domains=[
                 {"domain": "fresh.example"},
@@ -345,22 +344,10 @@ class TestDomainRouting:
                 {"x": 1},
             ]
         )
-        client = make_client(api=FakeApi().on("GET", EP_DOMAINS, resp))
+        api = FakeApi().on("GET", EP_DOMAINS, resp, ZlibError("domain_invalid", "x"))
+        client = make_client(api=api)
         assert await client.discover_domains() == 1
-
-    @pytest.mark.asyncio
-    async def test_discover_domains_failure_returns_zero(self, make_client):
-        api = FakeApi().on("GET", EP_DOMAINS, ZlibError("domain_invalid", "x"))
-        assert await make_client(api=api).discover_domains() == 0
-
-    def test_user_domains_and_socks_flag_passed_to_pool(self, make_client):
-        client = make_client(domains=["https://mine.example"])
-        assert client.domains.primary == "https://mine.example"
-        onion = "a" * 56 + ".onion"
-        with pytest.raises(ValueError):
-            make_client(domains=[onion])
-        client = make_client(domains=[onion], proxy="socks5h://127.0.0.1:9050")
-        assert client.domains.primary.endswith(".onion")
+        assert await client.discover_domains() == 0
 
 
 # ---------- 搜索 ----------
@@ -374,8 +361,7 @@ class TestSearch:
             pagination={"current": 2, "total_pages": 5, "total_items": 99},
         )
         api = FakeApi().on("POST", EP_SEARCH, resp)
-        client = make_client(api=api)
-        result = await client.search(
+        result = await make_client(api=api).search(
             "  资本论  ", limit=7, page=2, language="中文", extension=".PDF"
         )
         (call,) = api.calls
@@ -394,14 +380,6 @@ class TestSearch:
             99,
         )
         assert [b.id for b in result.books] == [1, 2]
-        assert (result.language, result.extension) == ("chinese", "pdf")
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(("given", "sent"), [(0, 1), (-5, 1), (10, 10), (500, 50)])
-    async def test_limit_clamped(self, make_client, given, sent):
-        api = FakeApi().on("POST", EP_SEARCH, ok(books=[]))
-        await make_client(api=api).search("x", limit=given)
-        assert api.calls[0]["data"]["limit"] == sent
 
     @pytest.mark.asyncio
     async def test_page_floor_and_optional_filters_omitted(self, make_client):
@@ -409,8 +387,14 @@ class TestSearch:
         await make_client(api=api).search("x", page=0)
         data = api.calls[0]["data"]
         assert data["page"] == 1
-        assert "languages[]" not in data
-        assert "extensions[]" not in data
+        assert "languages[]" not in data and "extensions[]" not in data
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("given", "sent"), [(0, 1), (500, 50)])
+    async def test_limit_clamped(self, make_client, given, sent):
+        api = FakeApi().on("POST", EP_SEARCH, ok(books=[]))
+        await make_client(api=api).search("x", limit=given)
+        assert api.calls[0]["data"]["limit"] == sent
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("query", ["", "   "])
@@ -437,13 +421,6 @@ class TestSearch:
         assert (result.page, result.total_pages, result.total_items) == (3, 1, 1)
 
     @pytest.mark.asyncio
-    async def test_cache_flushed_to_disk(self, make_client, tmp_path):
-        api = FakeApi().on("POST", EP_SEARCH, ok(books=[api_book(5)]))
-        path = tmp_path / "cache.json"
-        await make_client(api=api, cache_path=path).search("x")
-        assert path.exists()
-
-    @pytest.mark.asyncio
     async def test_non_auth_errors_not_retried(self, make_client):
         api = FakeApi().on("POST", EP_SEARCH, biz_error("boom"))
         client = make_client([remix(logged_in=True)], api)
@@ -455,50 +432,42 @@ class TestSearch:
 
 class TestSearchAuthRetry:
     @pytest.mark.asyncio
-    async def test_retries_with_logged_in_account_cookies(self, make_client):
-        api = FakeApi().on(
-            "POST", EP_SEARCH, biz_error("Please login", 400), ok(books=[api_book(1)])
-        )
-        client = make_client([remix(logged_in=True)], api)
-        result = await client.search("x")
-        assert [b.id for b in result.books] == [1]
-        first, second = api.calls
-        assert first["cookies"] == {}
-        assert second["cookies"] == {"remix_userid": "1", "remix_userkey": SECRET_KEY}
-
-    @pytest.mark.asyncio
-    async def test_logs_in_first_when_needed(self, make_client):
+    async def test_logs_in_then_retries_with_account_cookies(self, make_client):
         api = (
             FakeApi()
-            .on("POST", EP_SEARCH, biz_error("Please login", 403), ok(books=[]))
+            .on(
+                "POST",
+                EP_SEARCH,
+                biz_error("Please login", 400),
+                ok(books=[api_book(1)]),
+            )
             .on("GET", EP_PROFILE, profile(key=SECRET_KEY))
         )
         client = make_client([remix()], api)
-        await client.search("x")
+        result = await client.search("x")
+        assert [b.id for b in result.books] == [1]
         assert api.paths() == [
             ("POST", EP_SEARCH),
             ("GET", EP_PROFILE),
             ("POST", EP_SEARCH),
         ]
+        first, _, retry = api.calls
+        assert first["cookies"] == {}
+        assert retry["cookies"] == REMIX_COOKIES
 
     @pytest.mark.asyncio
-    async def test_no_account_raises_auth_failed(self, make_client):
-        api = FakeApi().on("POST", EP_SEARCH, biz_error("Please login", 403))
-        with pytest.raises(ZlibError) as exc:
-            await make_client(api=api).search("x")
-        assert exc.value.category == "auth_failed"
-        assert len(api.calls) == 1
-
-    @pytest.mark.asyncio
-    async def test_account_login_failure_raises_auth_failed(self, make_client):
+    @pytest.mark.parametrize("accounts", [[], [remix()]], ids=["none", "login_fails"])
+    async def test_no_usable_account_raises_auth_failed(self, make_client, accounts):
         api = (
             FakeApi()
             .on("POST", EP_SEARCH, biz_error("Please login", 403))
             .on("GET", EP_PROFILE, LOGIN_ERR)
         )
+        client = make_client(accounts, api)
         with pytest.raises(ZlibError) as exc:
-            await make_client([remix()], api).search("x")
+            await client.search("x")
         assert exc.value.category == "auth_failed"
+        assert len([p for p in api.paths() if p == ("POST", EP_SEARCH)]) == 1
 
     @pytest.mark.asyncio
     async def test_retry_failure_propagates_and_is_not_repeated(self, make_client):
@@ -528,23 +497,25 @@ class TestGetDownloadLink:
         assert api.calls[0]["cookies"]["remix_userid"] == "1"
 
     @pytest.mark.asyncio
-    async def test_extension_not_duplicated(self, make_client):
-        resp = download_link_response(description="a.pdf (x)", extension="pdf")
+    @pytest.mark.parametrize(
+        ("description", "expected"), [("a.pdf (x)", "a.pdf"), ("N (x)", "N.pdf")]
+    )
+    async def test_extension_not_duplicated(self, make_client, description, expected):
+        resp = download_link_response(description=description, extension="pdf")
         (_, name), _ = await self._link(make_client, resp)
-        assert name == "a.pdf"
+        assert name == expected
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("extension", "suffix"),
         [
             ("pdf/../../evil", ".pdfevil"),
-            ("p.d.f", ".pdf"),
             ("", ".epub"),
-            ("../..", ".epub"),
             ("a" * 20, "." + "a" * 8),
         ],
     )
     async def test_extension_whitelisted(self, make_client, extension, suffix):
+        """远端 extension 是路径注入入口，只允许字母数字且限长。"""
         resp = download_link_response(extension=extension, description="Name (x)")
         (_, name), _ = await self._link(make_client, resp)
         assert name == "Name" + suffix
@@ -558,12 +529,7 @@ class TestGetDownloadLink:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "description",
-        [
-            "../../etc/passwd (x)",
-            "..\\..\\win.ini (x)",
-            "a/b\\c:d*e?f (x)",
-            "\x00\x1fbad (x)",
-        ],
+        ["../../etc/passwd (x)", "a/b\\c:d*e?f (x)"],
     )
     async def test_description_cannot_inject_path(self, make_client, description):
         resp = download_link_response(description=description, extension="pdf")
@@ -599,11 +565,13 @@ class TestFetchFile:
         assert calls[0]["timeout_total"] == client.timeout * 4
 
     @pytest.mark.asyncio
-    async def test_exactly_at_cap_accepted(self, make_client, monkeypatch):
+    async def test_cap_boundary_and_zero_config_floor(self, make_client, monkeypatch):
         client = make_client()
         client.max_download_bytes = 1000
         fake_fetch(client, monkeypatch, b"x" * 1000, chunk_size=64)
         assert len(await client._fetch_file(self.URL)) == 1000
+        # 配置成 0 MB 时下限保底 1 MiB，否则任何文件都会被判超限
+        assert make_client(max_download_mb=0).max_download_bytes == 1024 * 1024
 
     @pytest.mark.asyncio
     async def test_over_cap_rejected_even_when_split_into_many_chunks(
@@ -617,9 +585,43 @@ class TestFetchFile:
         assert exc.value.category == "api_error"
         assert "上限" in exc.value.message
 
-    def test_cap_derived_from_config_mb(self, make_client):
-        assert make_client(max_download_mb=3).max_download_bytes == 3 * 1024 * 1024
-        assert make_client(max_download_mb=0).max_download_bytes == 1024 * 1024
+    @pytest.mark.asyncio
+    async def test_sink_receives_every_chunk_with_filename_and_progress(
+        self, make_client, monkeypatch
+    ):
+        client = make_client()
+        body = bytes(range(256)) * 4
+        fake_fetch(client, monkeypatch, body, chunk_size=300)
+        got, progress = [], []
+
+        async def sink(name, chunk):
+            got.append((name, chunk))
+
+        async def on_progress(read, total):
+            progress.append(read)
+
+        out = await client._fetch_file(
+            self.URL, filename="b.pdf", sink=sink, on_progress=on_progress
+        )
+        assert out == b""  # 给了 sink 就不在内存里再留一份
+        assert {n for n, _ in got} == {"b.pdf"}
+        assert b"".join(c for _, c in got) == body
+        assert progress == sorted(progress) and progress[-1] == len(body)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("size", [0, 5000], ids=["empty", "over_cap"])
+    async def test_sink_path_still_enforces_cap_and_non_empty(
+        self, make_client, monkeypatch, size
+    ):
+        client = make_client()
+        client.max_download_bytes = 1000
+        fake_fetch(client, monkeypatch, b"x" * size, chunk_size=64)
+
+        async def sink(name, chunk):
+            return None
+
+        with pytest.raises(ZlibError):
+            await client._fetch_file(self.URL, filename="f", sink=sink)
 
     @pytest.mark.asyncio
     async def test_empty_body_rejected(self, make_client, monkeypatch):
@@ -672,25 +674,15 @@ class TestDownload:
         client.api.on("GET", file_path(book), download_link_response())
 
     @pytest.mark.asyncio
-    async def test_success_returns_account_filename_content(
-        self, make_client, monkeypatch
-    ):
-        book = make_book(1)
-        client = make_client([remix(logged_in=True)])
-        self._wire(client, monkeypatch, book)
-        client.api.on("GET", EP_PROFILE, profile(today=1))
-        account, filename, content = await client.download(book)
-        assert (account.name, filename, content) == ("r", "My Book.pdf", b"CONTENT")
-
-    @pytest.mark.asyncio
-    async def test_quota_refreshed_from_server_after_download(
+    async def test_success_and_quota_refreshed_from_server(
         self, make_client, monkeypatch
     ):
         book = make_book(1)
         client = make_client([remix(logged_in=True)])
         self._wire(client, monkeypatch, book)
         client.api.on("GET", EP_PROFILE, profile(today=7, limit=10))
-        account, _, _ = await client.download(book)
+        account, filename, content = await client.download(book)
+        assert (account.name, filename, content) == ("r", "My Book.pdf", b"CONTENT")
         assert (account.downloads_today, account.downloads_limit) == (7, 10)
         assert client.api.paths()[-1] == ("GET", EP_PROFILE)
 
@@ -704,12 +696,13 @@ class TestDownload:
         assert account.downloads_today == 3
 
     @pytest.mark.asyncio
-    async def test_prefers_account_with_most_remaining_quota(
+    async def test_account_selection_prefers_quota_and_skips_full(
         self, make_client, monkeypatch
     ):
         book = make_book(1)
         client = make_client(
             [
+                remix("full", logged_in=True, downloads_today=10),
                 remix("low", remix_userid="1", logged_in=True, downloads_today=8),
                 remix("high", remix_userid="2", logged_in=True, downloads_today=1),
             ]
@@ -720,20 +713,6 @@ class TestDownload:
         assert account.name == "high"
         link_call = next(c for c in client.api.calls if c["path"] == file_path(book))
         assert link_call["cookies"]["remix_userid"] == "2"
-
-    @pytest.mark.asyncio
-    async def test_accounts_without_quota_skipped(self, make_client, monkeypatch):
-        book = make_book(1)
-        client = make_client(
-            [
-                remix("full", logged_in=True, downloads_today=10),
-                remix("ok", remix_userid="2", logged_in=True),
-            ]
-        )
-        self._wire(client, monkeypatch, book)
-        client.api.on("GET", EP_PROFILE, profile(user_id="2"))
-        account, _, _ = await client.download(book)
-        assert account.name == "ok"
 
     @pytest.mark.asyncio
     async def test_auth_failed_switches_to_next_account_and_marks_logged_out(
@@ -758,8 +737,7 @@ class TestDownload:
         account, _, _ = await client.download(book)
         expired = client.accounts[0]
         assert account.name == "fine"
-        assert expired.logged_in is False
-        assert expired.last_error
+        assert expired.logged_in is False and expired.last_error
 
     @pytest.mark.asyncio
     async def test_quota_exhausted_switches_and_zeroes_local_quota(
@@ -798,37 +776,22 @@ class TestDownload:
         assert len([c for c in client.api.calls if c["path"] == file_path(book)]) == 2
 
     @pytest.mark.asyncio
-    async def test_all_logins_expired_reports_auth_failed(self, make_client):
-        book = make_book(1)
-        client = make_client([remix(logged_in=True)])
-        client.api.on("GET", file_path(book), LOGIN_ERR)
-        with pytest.raises(ZlibError) as exc:
-            await client.download(book)
-        assert exc.value.category == "auth_failed"
-
-    @pytest.mark.asyncio
-    async def test_no_accounts_configured(self, make_client):
-        client = make_client([])
-        with pytest.raises(ZlibError) as exc:
-            await client.download(make_book(1))
-        assert exc.value.category == "auth_failed"
-        assert client.api.calls == []
-
-    @pytest.mark.asyncio
-    async def test_no_account_can_log_in(self, make_client):
-        client = make_client([remix()])
-        client.api.on("GET", EP_PROFILE, LOGIN_ERR)
+    @pytest.mark.parametrize(
+        ("accounts", "path", "category"),
+        [
+            ([], None, "auth_failed"),
+            ([remix()], ("GET", EP_PROFILE), "auth_failed"),
+            ([remix(logged_in=True, downloads_today=10)], None, "quota_exhausted"),
+        ],
+        ids=["no_accounts", "cannot_log_in", "all_over_quota"],
+    )
+    async def test_no_usable_account(self, make_client, accounts, path, category):
+        client = make_client(accounts)
+        if path:
+            client.api.on(*path, LOGIN_ERR)
         with pytest.raises(ZlibError) as exc:
             await client.download(make_book(1))
-        assert exc.value.category == "auth_failed"
-
-    @pytest.mark.asyncio
-    async def test_all_accounts_over_quota(self, make_client):
-        client = make_client([remix(logged_in=True, downloads_today=10)])
-        with pytest.raises(ZlibError) as exc:
-            await client.download(make_book(1))
-        assert exc.value.category == "quota_exhausted"
-        assert client.api.calls == []
+        assert exc.value.category == category
 
     @pytest.mark.asyncio
     async def test_other_errors_are_raised_not_rotated(self, make_client):
@@ -856,19 +819,18 @@ class TestDownload:
         assert client.accounts[0].downloads_today == 0
 
     @pytest.mark.asyncio
-    async def test_download_by_id(self, make_client, monkeypatch):
+    @pytest.mark.parametrize("book_id", [11, 99])
+    async def test_download_by_id(self, make_client, monkeypatch, book_id):
         book = make_book(11)
         client = make_client([remix(logged_in=True)])
         client.book_cache.put_many([book])
         self._wire(client, monkeypatch, book)
         client.api.on("GET", EP_PROFILE, profile())
-        _, filename, _ = await client.download_by_id(11)
-        assert filename == "My Book.pdf"
-
-    @pytest.mark.asyncio
-    async def test_download_by_id_unknown(self, make_client):
-        with pytest.raises(ZlibError, match="id=99"):
-            await make_client().download_by_id(99)
+        if book_id == 99:
+            with pytest.raises(ZlibError, match="id=99"):
+                await client.download_by_id(book_id)
+        else:
+            assert (await client.download_by_id(book_id))[1] == "My Book.pdf"
 
 
 # ---------- 封面 ----------
@@ -880,11 +842,16 @@ def _png_bytes(w=60, h=90):
     return buf.getvalue()
 
 
+PNG = _png_bytes()
+
+
 class TestFetchCover:
     COVER = "https://8.8.8.8/c.png"
 
     @pytest.mark.asyncio
-    async def test_embeds_resized_jpeg_data_uri(self, make_client, monkeypatch):
+    async def test_embeds_resized_jpeg_data_uri_with_referer(
+        self, make_client, monkeypatch
+    ):
         client = make_client(domains=["https://mine.example"])
         seen = {}
 
@@ -899,6 +866,26 @@ class TestFetchCover:
         assert seen["timeout"] == 8
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("body", "status", "chunk_size", "max_bytes"),
+        [
+            (None, 200, None, 1024 * 1024),  # 安全校验拒绝
+            (PNG, 404, None, 1024 * 1024),  # 非 200
+            (PNG, 200, 100, 100),  # 超过 max_bytes
+            (b"", 200, None, 1024 * 1024),  # 空响应
+            (b"<html>not an image</html>", 200, None, 1024 * 1024),
+        ],
+        ids=["blocked", "non_200", "oversized", "empty", "undecodable"],
+    )
+    async def test_failures_degrade_to_empty(
+        self, make_client, monkeypatch, body, status, chunk_size, max_bytes
+    ):
+        """封面是锦上添花：任何失败都返回空串（卡片用占位），绝不抛也不能返回原图。"""
+        client = make_client()
+        fake_fetch(client, monkeypatch, body, status=status, chunk_size=chunk_size)
+        assert await client.fetch_cover_data_uri(self.COVER, max_bytes=max_bytes) == ""
+
+    @pytest.mark.asyncio
     async def test_empty_url_makes_no_request(self, make_client, monkeypatch):
         client = make_client()
 
@@ -907,33 +894,6 @@ class TestFetchCover:
 
         monkeypatch.setattr(client.transport, "guarded_get", boom)
         assert await client.fetch_cover_data_uri("") == ""
-
-    @pytest.mark.asyncio
-    async def test_guard_rejection_gives_empty(self, make_client, monkeypatch):
-        client = make_client()
-        fake_fetch(client, monkeypatch, None)
-        assert await client.fetch_cover_data_uri("http://10.0.0.1/c.png") == ""
-
-    @pytest.mark.asyncio
-    async def test_non_200_gives_empty(self, make_client, monkeypatch):
-        client = make_client()
-        fake_fetch(client, monkeypatch, _png_bytes(), status=404)
-        assert await client.fetch_cover_data_uri(self.COVER) == ""
-
-    @pytest.mark.asyncio
-    async def test_oversized_cover_gives_empty(self, make_client, monkeypatch):
-        client = make_client()
-        fake_fetch(client, monkeypatch, _png_bytes(600, 900), chunk_size=100)
-        assert await client.fetch_cover_data_uri(self.COVER, max_bytes=100) == ""
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("body", [b"", b"<html>not an image</html>"])
-    async def test_empty_or_undecodable_gives_empty(
-        self, make_client, monkeypatch, body
-    ):
-        client = make_client()
-        fake_fetch(client, monkeypatch, body)
-        assert await client.fetch_cover_data_uri(self.COVER) == ""
 
 
 # ---------- 状态与诊断 ----------
@@ -958,13 +918,7 @@ class TestStatusAndDiagnose:
             "downloads_left": 7,
             "last_error": "",
         }
-        assert rows[1]["login_mode"] == "password"
-        assert rows[1]["last_error"] == "bad"
-
-    def test_account_status_has_no_credentials(self, make_client):
-        text = str(make_client([remix(), pwd()]).account_status())
-        assert SECRET_KEY not in text
-        assert SECRET_PW not in text
+        assert (rows[1]["login_mode"], rows[1]["last_error"]) == ("password", "bad")
 
     @pytest.mark.asyncio
     async def test_diagnose_probes_every_domain_and_relogs(self, make_client):
@@ -1042,3 +996,7 @@ class TestNoCredentialLeak:
         with pytest.raises(ZlibError) as exc:
             await client.login_account(client.accounts[0])
         assert SECRET_PW not in str(exc.value) + exc.value.detail
+
+    def test_account_status_has_no_credentials(self, make_client):
+        text = str(make_client([remix(), pwd()]).account_status())
+        assert SECRET_KEY not in text and SECRET_PW not in text

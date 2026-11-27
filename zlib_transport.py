@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Awaitable, Callable
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
@@ -51,6 +52,9 @@ MAX_API_BYTES = 8 * 1024 * 1024
 
 # 建立 TCP 连接的超时：连不上的域名尽快判负并转移，不必等满整体超时
 CONNECT_TIMEOUT = 8.0
+
+# 流式读取的数据块：64 KiB 是 aiohttp 内部缓冲区量级，过大不提升吞吐只增内存峰值
+READ_CHUNK = 64 * 1024
 
 # Set-Cookie 名称的合法字符（RFC 6265 token）：用来区分 `name=value` 与属性
 _COOKIE_NAME_RE = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
@@ -147,19 +151,37 @@ def normalize_socks_proxy_url(value: str) -> str:
     return parsed._replace(scheme=scheme).geturl()
 
 
-async def read_limited(resp: aiohttp.ClientResponse, limit: int) -> bytes:
+async def read_limited(
+    resp: aiohttp.ClientResponse,
+    limit: int,
+    *,
+    sink: Callable[[bytes], Awaitable[None]] | None = None,
+    on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+) -> bytes:
     """最多读取 limit+1 字节（多读 1 字节用于超限判定）。
 
     StreamReader.read(n) 每次只返回当前已到达的一块，不保证读满 n，
     因此循环读取直到流结束或超出上限。
+
+    sink：边读边把数据块交给它（大文件流式落盘，内存只保留一块），
+    此时返回值是空字节串；不传 sink 才把内容收集起来返回。
+    on_progress：每块读完后回调 (已读字节, 声明总字节)，总字节未知时为 0。
     """
+    total_hint = getattr(resp, "content_length", None) or 0
     chunks: list[bytes] = []
     total = 0
-    async for chunk in resp.content.iter_chunked(64 * 1024):
-        chunks.append(chunk)
+    async for chunk in resp.content.iter_chunked(READ_CHUNK):
         total += len(chunk)
+        if sink is not None:
+            await sink(chunk)
+        else:
+            chunks.append(chunk)
+        if on_progress is not None:
+            await on_progress(min(total, limit), total_hint)
         if total > limit:
             break
+    if sink is not None:
+        return b""
     return b"".join(chunks)[: limit + 1]
 
 

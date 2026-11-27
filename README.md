@@ -49,7 +49,9 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 |------|------|
 | `/zlib 搜索 关键词 [-l 语言] [-e 格式] [-n 条数]` | 搜索；例如 `/zlib 搜索 资本论 -l zh -e pdf`。别名 `搜`、`search`、`s` |
 | `/zlib 下一页` / `/zlib 上一页` | 对最近一次搜索翻页。别名 `next`/`n`、`prev`/`p` |
+| `/zlib 详情 序号或id` | 看一本书的完整信息：出版社、页数、丛书、分类与简介。别名 `详`、`detail`、`d` |
 | `/zlib 下载 序号或id` | 序号取自当前会话最近一次结果；超出本页条数的数字按书籍 id 处理。别名 `下`、`download`、`dl` |
+| `/zlib 3` | 下载的简写，等价于 `/zlib 下载 3`（`/zl 3` 同样可用） |
 | `/zlib 状态` | 账号登录状态与今日额度（仅管理员）。别名 `status` |
 | `/zlib 诊断` | 探测每个镜像的可达性与延迟、检查账号登录（仅管理员）。别名 `diag` |
 | `/zlib 帮助` | 指令说明。别名 `help` |
@@ -62,8 +64,8 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 
 | 工具 | 参数 | 说明 |
 |------|------|------|
-| `zlib_search_books` | `query`（必填）、`limit`、`page`、`language`、`extension` | 搜索，返回卡片图片路径与带 id 的文本书目 |
-| `zlib_download_book` | `book_id`（必填） | 按搜索结果 id 下载，消耗额度，仅在用户明确要求时调用 |
+| `zlib_search_books` | `query`（必填）、`limit`、`page`、`language`、`extension` | 搜索，插件自动发出结果卡片，同时把带 id 与简介的文本书目交给模型 |
+| `zlib_download_book` | `book_id`（必填） | 按搜索结果 id 下载，消耗额度，仅在用户明确要求时调用；文件由插件发出 |
 | `zlib_get_status` | 无 | 账号池状态，仅管理员会话可用 |
 
 ```
@@ -73,7 +75,7 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 模型调用: zlib_download_book(book_id=<搜索结果中的 id>)
 ```
 
-书目字段进入工具结果前会清除围栏标记并截断，降低书名中夹带指令造成提示注入的风险。工具返回文件路径后，由模型调用 `send_message_to_user`（`type=file`）发送。
+书目字段进入工具结果前会清除围栏标记并截断，降低书名中夹带指令造成提示注入的风险。工具调用后按需发送的消息（搜索结果卡片、下载好的文件）由插件直接发出，模型只需用文字说明结果，不接触本地路径。
 
 ---
 
@@ -183,11 +185,16 @@ services:
 |------|------|
 | `zlib_transport.py` | aiohttp 传输层：请求头、手动同源重定向与 Cookie 合并、响应分类、有界读取、受保护的下载 GET（SSRF 与对端核验） |
 | `zlib_domains.py` | 镜像池：内置/自定义/学习三级优先、冷却、故障转移、批量探测 |
-| `zlib_client.py` | E-API 客户端：账号池登录、搜索、下载链接、封面抓取、状态与诊断 |
+| `zlib_client.py` | E-API 客户端：账号池登录、搜索、下载链接、封面抓取、流式下载、状态与诊断 |
 | `zlib_service.py` | 指令与工具共用的业务层：搜索、卡片、序号解析、下载落盘 |
 | `zlib_cards.py` | 卡片 HTML 模板与渲染数据（所有书目字段显式转义） |
+| `zlib_models.py` | 书目、搜索结果与账号的数据模型，以及交给模型的书目行/详情格式 |
 | `zlib_store.py` | 书目缓存（持久化）与按会话的搜索记忆 |
 | `zlib_format.py` | 指令参数解析与文本格式化 |
+| `zlib_text.py` | 乱码修复、文件名清洗、简介清洗与限长、封面缩放 |
+| `zlib_security.py` | SSRF 校验：私网地址判定、DNS 二次校验、onion 地址规则 |
+| `zlib_errors.py` | 错误分类与哪些类别触发故障转移 |
+| `zlib_paths.py` | 插件数据目录 |
 | `tools/` | 三个 LLM 工具 |
 
 下载文件保存在 `<data>/plugin_data/zlibrary_assistant/books/`，保留 7 天。
@@ -220,17 +227,7 @@ AstrBot 文转图优先走云端渲染，失败时回退本地渲染，本地渲
 2. 运行中的容器：`docker exec -it <容器名> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"`
 3. 把任意中文字体复制为 `data/font.ttf`：`docker cp msyh.ttc <容器名>:/AstrBot/data/font.ttf`
 
-### Q6：LLM 下载完成但发不出文件，提示 "Sandbox runtime is disabled by configuration"？
-
-`send_message_to_user` 发送本地文件依赖 AstrBot 的 `computer_use_runtime`，默认为 `none`。在 WebUI 的 配置 → 服务提供商设置 把 `computer_use_runtime` 改为 `local`（必要时把 `computer_use_require_admin` 设为 `false`），或在 `data/config/astrbot_config.json` 写入：
-
-```json
-{"provider_settings": {"computer_use_runtime": "local", "computer_use_require_admin": false}}
-```
-
-保存后重启 AstrBot。`/zlib 下载` 指令直接发送文件，不受此项影响。
-
-### Q7：Docker 部署时搜索很慢、封面全是占位？
+### Q6：Docker 部署时搜索很慢、封面全是占位？
 
 容器是独立网络环境，`http://127.0.0.1:端口` 指向容器自己。`proxy` 请填容器可访问的地址：Docker Desktop 可用 `http://host.docker.internal:端口`，Linux 用宿主机局域网 IP 并在代理软件中允许局域网连接；需要认证时写 `http://用户名:密码@IP:端口`。云端文转图不可达时，渲染有 25 秒超时保护并自动降级为文本书目；仍嫌紧可调大 `agent_runner.config.misc.tool_call_timeout`。
 
