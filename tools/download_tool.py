@@ -1,41 +1,30 @@
-"""zlib_download_book 工具：按 id 下载书籍到 AstrBot 数据目录。
-
-文件保存到 <AstrBot data>/plugin_data/zlibrary_assistant/books/，向 LLM 返回**绝对路径**。
-AstrBot 的 send_message_to_user 在 Computer Use 本地运行时（computer_use_runtime=local）
-下允许发送本地绝对路径文件（需在 WebUI 启用 Computer Use）。
-"""
+"""zlib_download_book 工具：按 id 下载书籍，文件由插件直接发给用户。"""
 
 from __future__ import annotations
 
-import os
-import time
 from typing import Any
 
-import aiofiles
-from astrbot.api import logger
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
+from astrbot.core.message.components import File
+from astrbot.core.message.message_event_result import MessageChain
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 
-from ..zlib_client import ZlibClient, ZlibError
-from ..zlib_paths import plugin_data_dir
-
-# 下载目录保留期：书籍文件只增不减会把磁盘吃满（书籍常在数十 MB 量级），
-# 超过保留期的文件在每次成功下载后清理；不做成配置项以免扩散配置面
-_DOWNLOAD_RETENTION_DAYS = 7
+from ..zlib_errors import ZlibError
+from ..zlib_service import ZlibService
+from .common import deliver, is_admin_context
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
     name: str = "zlib_download_book"
     description: str = (
-        "从 Z-Library 下载一本书籍文件到本地。"
-        "重要：仅在用户明确要求下载某本书时才调用，不要擅自下载！"
-        "每次下载会消耗账号的每日下载额度（每个账号每日约 10 次，账号池共享轮换）。"
-        "book_id 必须来自 zlib_search_books 的搜索结果。"
-        "下载完成后请使用 send_message_to_user（type=file, path=绝对路径）把文件发送给用户，并告知剩余下载额度。"
+        "把 Z-Library 上的一本书下载并直接发给用户。"
+        "只在用户明确表示要这本书（要文件、要下载、接受你推荐的版本）时调用，不要替用户擅自下载。"
+        "book_id 必须是 zlib_search_books 返回的 id；用户只说了书名没确认版本时，先搜索再问。"
+        "文件由插件自己发给用户，你无需重发；下载成功后向用户说明发的是什么书即可。"
     )
     parameters: dict = Field(
         default_factory=lambda: {
@@ -43,79 +32,43 @@ class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
             "properties": {
                 "book_id": {
                     "type": "integer",
-                    "description": "书籍 id，必须来自 zlib_search_books 返回的编号列表",
+                    "description": "书籍 id，必须来自 zlib_search_books 返回的书目清单",
                 },
             },
             "required": ["book_id"],
         }
     )
-    client: ZlibClient | None = None
-
-    def _download_dir(self) -> str:
-        d = os.path.join(plugin_data_dir(), "books")
-        os.makedirs(d, exist_ok=True)
-        return d
-
-    def _purge_expired(self) -> None:
-        """删除下载目录中超过保留期的旧文件（按 mtime）。
-
-        清理是维护动作，与本次下载结果无关：任何失败只记 warning，
-        绝不改变本次下载的成败与返回值。
-        """
-        cutoff = time.time() - _DOWNLOAD_RETENTION_DAYS * 86400
-        d = self._download_dir()
-        try:
-            for name in os.listdir(d):
-                path = os.path.join(d, name)
-                try:
-                    if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
-                        os.remove(path)
-                except OSError as e:
-                    logger.warning(f"清理过期下载文件失败 {name}: {e}")
-        except OSError as e:
-            logger.warning(f"清理过期下载文件失败: {e}")
+    service: ZlibService | None = None
+    admin_only: bool = False
 
     async def call(
         self, context: ContextWrapper[AstrAgentContext], **kwargs: Any
     ) -> ToolExecResult:
-        if self.client is None:
-            return "插件客户端未初始化，请检查插件配置"
-
+        if self.service is None:
+            return "插件未初始化，请检查插件配置"
+        if self.admin_only and not is_admin_context(context):
+            return "下载仅管理员可用，当前用户不是管理员，请说明后停止。"
         try:
             book_id = int(kwargs.get("book_id"))
         except (TypeError, ValueError):
             return "参数 book_id 必须是数字（来自 zlib_search_books 的搜索结果 id）"
 
+        book = self.service.client.book_cache.get(book_id)
+        if book is None:
+            return f"没有 id={book_id} 的书籍信息，请先调用 zlib_search_books 搜索"
         try:
-            account, filename, content = await self.client.download_by_id(book_id)
+            done = await self.service.download(book)
         except ZlibError as e:
             return f"下载失败：{e.message}"
 
-        # 保存文件到 AstrBot 数据目录
-        try:
-            base = os.path.realpath(self._download_dir())
-            out_path = os.path.join(base, filename)
-            # 文件名来自远端 JSON（description/extension），下载工具又对会话开放，
-            # 写盘前必须确认落点仍在下载目录内：越界即拒绝，且不回显路径细节
-            real = os.path.realpath(out_path)
-            if real != base and not real.startswith(base + os.sep):
-                logger.warning("下载文件名越出下载目录，已拒绝保存")
-                return "下载失败：文件名不合法"
-            async with aiofiles.open(out_path, "wb") as f:
-                await f.write(content)
-        except OSError as e:
-            logger.error(f"保存下载文件失败: {e}")
-            return f"下载成功但保存文件失败：{e}"
-
-        self._purge_expired()
-
-        left = account.downloads_left
+        await deliver(
+            context,
+            MessageChain(chain=[File(name=done.filename, file=str(done.path))]),
+        )
         return (
-            f"下载完成 ✅\n"
-            f"- 书名：{filename}\n"
-            f"- 大小：{len(content) / 1024 / 1024:.1f} MB\n"
-            f"- 保存路径：{out_path}\n"
-            f"- 今日剩余额度 {left} 次\n"
-            f"请用 send_message_to_user 发送文件给用户："
-            f'{{"type": "file", "path": "{out_path}"}}（绝对路径）。'
+            "已把文件发给用户\n"
+            f"- 书名：{book.title or '未知'}\n"
+            f"- 格式：{(book.extension or '').upper() or '未知'}\n"
+            f"- 大小：{done.size / 1024 / 1024:.1f} MB\n"
+            "无需再让用户确认文件路径，也不要把本地路径写进回复。"
         )

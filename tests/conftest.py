@@ -7,14 +7,19 @@
 
 import os
 import sys
+import tempfile
+from pathlib import Path
+
+import pytest
 
 _WORKSPACE = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-_ASTRBOT = os.path.join(_WORKSPACE, "AstrBot")
+# AstrBot 源码根：环境变量 ASTRBOT_SRC 优先；已 pip 安装 astrbot 时可不设
+_ASTRBOT = os.environ.get("ASTRBOT_SRC", "")
 
 for p in (_WORKSPACE, _ASTRBOT):
-    if p not in sys.path:
+    if p and p not in sys.path:
         sys.path.insert(0, p)
 
 
@@ -44,3 +49,10 @@ class FakeHeaders:
 
     def __contains__(self, key):
         return self.get(key) is not None
+
+
+@pytest.fixture
+def tmp_path():
+    """每个用例独立的临时目录：直接用 tempfile，避免依赖 pytest 共享的临时根目录。"""
+    with tempfile.TemporaryDirectory(prefix="zlib_test_") as d:
+        yield Path(d)

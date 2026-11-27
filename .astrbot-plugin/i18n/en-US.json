@@ -1,50 +1,62 @@
 {
   "metadata": {
-    "display_name": "Z-Library Assistant",
-    "desc": "Adds Z-Library book search and download to AstrBot (account pool, HTML card results, quota control)."
+    "display_name": "Zlibrary Assistant",
+    "desc": "Z-Library book search and download for AstrBot: automatic mirror failover, /zlib commands, card-image results, and an account pool that picks the freest account"
   },
   "config": {
     "accounts": {
-      "description": "Z-Library account pool (add multiple accounts; downloads automatically rotate to the account with the most remaining quota)",
-      "hint": "Each account has its own daily download quota (about 10 per day on a free account); more accounts raise the total daily download count. The remix credential method (last two fields) is recommended, as it is almost unaffected by Z-Library login risk control.",
       "templates": {
         "account": {
           "name": "Account",
-          "hint": "Add multiple accounts to share the daily download quota (about 10 per day per free account)",
-          "email": {
-            "description": "Account email (method 1)",
-            "hint": "Fill in together with the password; after a successful login the plugin automatically exchanges it for remix credentials. Note: the login endpoint is easily flagged by Z-Library risk control for shared IPs (#ipd3). If you keep getting rate-limited, switch to the remix method below."
+          "label": {
+            "description": "Account label",
+            "hint": "Shown in logs and status only, e.g. account1"
           },
-          "password": {
-            "description": "Account password (method 1)",
-            "hint": "Z-Library account password, paired with the email"
-          },
+          "hint": "Each account has its own daily download quota; more accounts raise the daily total",
           "remix_userid": {
-            "description": "remix_userid (method 2, recommended)",
-            "hint": "How to get it: log in to z-library.sk in a browser, press F12 → Application → Storage/Cookies → copy the value of remix_userid. Fill it in together with remix_userkey; the plugin verifies via GET profile and is not affected by risk control on the login endpoint."
+            "description": "remix_userid (recommended)",
+            "hint": "Log in to Z-Library in a browser, press F12, open Application → Cookies and copy the value of remix_userid. Fill it together with remix_userkey"
           },
           "remix_userkey": {
-            "description": "remix_userkey (method 2, recommended)",
-            "hint": "Same as above — the remix_userkey from the Cookie (a long alphanumeric string); it stays valid for a long time. If both methods are filled in, remix takes priority."
+            "description": "remix_userkey (recommended)",
+            "hint": "Same place as above; copy the value of remix_userkey. It stays valid for a long time. If both remix and email/password are set, remix wins"
+          },
+          "email": {
+            "description": "Account email (fallback)",
+            "hint": "Fill together with the password. The login endpoint is often rejected by risk control; use remix credentials if it fails"
+          },
+          "password": {
+            "description": "Account password (fallback)",
+            "hint": "Fill together with the email"
           }
         }
-      }
+      },
+      "description": "Z-Library account pool",
+      "hint": "Searching needs no account; downloading needs at least one. Add several accounts and the one with the most remaining quota is used. Remix credentials are recommended; email/password login is often blocked."
     },
-    "domain": {
-      "description": "Z-Library E-API domain or full URL",
-      "hint": "Enter a plain domain, a full https:// URL, or http://...onion; do not include the /eapi path. Onion mode also requires a Tor SOCKS proxy"
+    "domains": {
+      "description": "Extra mirror domains (optional)",
+      "hint": "The plugin ships a set of directly reachable mirrors with automatic failover; domains listed here take priority. Enter host names only, e.g. z-lib.by. Onion addresses need a Tor SOCKS proxy. The official main domains require browser verification and cannot be reached directly"
     },
     "proxy": {
       "description": "HTTP or SOCKS proxy (optional)",
-      "hint": "For plain domains use http://IP:port; onion requires Tor SOCKS, usually socks5://tor:9050 in Docker Compose. A plain HTTP/SOCKS proxy cannot replace Tor"
+      "hint": "e.g. http://127.0.0.1:7890. Onion domains require a Tor SOCKS proxy; with Docker Compose this is usually socks5://tor:9050"
     },
     "max_download_mb": {
-      "description": "Max single-file download size (MiB)",
-      "hint": "Prevents abnormal responses from exhausting AstrBot memory; valid range 1-512 MiB"
+      "description": "Maximum size of one download (MiB)",
+      "hint": "Prevents abnormal responses from exhausting memory; valid range 1-512"
     },
     "search_limit": {
       "description": "Default number of search results",
-      "hint": "The default used when the LLM does not specify a count. Range 1-8 (values above 8 are clamped to prevent oversized card images)"
+      "hint": "Range 1-10; larger values are capped to keep the card image short"
+    },
+    "card_enabled": {
+      "description": "Show search results as a card image",
+      "hint": "When off, replies are plain-text lists; plain text is also used automatically if the renderer is unavailable"
+    },
+    "download_admin_only": {
+      "description": "Only admins may download",
+      "hint": "Downloads spend the accounts' daily quota; when on, /zlib download and the LLM download tool are admin-only"
     }
   }
 }

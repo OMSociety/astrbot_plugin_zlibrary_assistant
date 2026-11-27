@@ -1,7 +1,7 @@
 name: zlibrary_assistant
 display_name: Zlibrary助手
-desc: 为 AstrBot 提供 Z-Library 图书搜索与下载能力（账号池、HTML 卡片结果、额度管控）
-version: 1.1.2
+desc: 为 AstrBot 提供 Z-Library 图书搜索与下载能力（多镜像自动故障转移、/zlib 指令、卡片图片结果、账号池自动选号）
+version: 1.2.0
 author: OMSociety
 repo: https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant
 tags:

@@ -1,12 +1,12 @@
-<p align="center"><strong>English</strong> · <a href="README.md">中文</a> · <a href="README_ru.md">Русский</a> · <a href="README_ja.md">日本語</a></p>
+<p align="center"><a href="README.md">中文</a> · <strong>English</strong> · <a href="README_ru.md">Русский</a> · <a href="README_ja.md">日本語</a></p>
 
 <div align="center">
 
-<h1><img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="192" alt="ZLibrary Assistant Logo"><br>Zlibrary Assistant</h1>
+<h1><img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="192" alt="Zlibrary Assistant"><br>Zlibrary Assistant</h1>
 
-**Z-Library book search & download assistant** — book search · one-click download · account pool rotation · HTML card results · quota management
+**Z-Library book search and download assistant** — automatic mirror failover · `/zlib` commands · card-image results · account pool with quota control
 
-[![Version](https://img.shields.io/badge/version-1.1.2-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/github/v/tag/OMSociety/astrbot_plugin_zlibrary_assistant?label=version&color=blue)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/releases)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
@@ -14,359 +14,239 @@
 
 </div>
 
-> This project was written by AI
+Zlibrary Assistant brings Z-Library search and download to AstrBot. It carries a built-in set of mirror domains with automatic failover, works through both `/zlib` commands and LLM tools, shows search results as card images, and downloads through an account pool that rotates by remaining quota.
 
 ---
 
-## Core Features
+## Quick start
 
-| Feature | Description |
-|------|------|
-| **Book Search** | Keyword search on Z-Library (33 million+ books), returns an HTML card image (cover/title/author/format/size) + a text list with ids |
-| **One-Click Download** | Just say the word and the file is sent to the conversation automatically; supports pdf / epub / mobi and more |
-| **Account Pool Rotation** | Multiple accounts share the daily download quota; the account with the most remaining quota is picked automatically, and a friendly message is shown when exhausted |
-| **Dual Credential Methods** | `remix_userid+remix_userkey` (bypasses login endpoint risk control) or `email+password` (automatically exchanged for remix credentials) |
-| **HTML Card Results** | Search results are rendered into uniform card images; failed cover loads automatically fall back to a gradient placeholder, so cards are never blank |
-| **Error Classification** | IP rate limiting / invalid domain / expired login / exhausted quota / network errors are all handled by category with friendly messages; the plugin does not crash |
+Search for "Zlibrary助手" in the AstrBot WebUI plugin market and install it.
+
+### Minimal configuration
+
+1. Search only: no configuration needed (set `proxy` if the server cannot reach the mirrors directly).
+2. To download: add one account under `accounts`; `remix_userid` + `remix_userkey` are recommended. Log in to Z-Library in a browser, press F12 and copy both values from Application → Cookies; they stay valid for a long time and avoid the login endpoint, which risk control often rejects. `email` + `password` also works.
+3. Save, reload the plugin, then send the bot:
+
+```
+/zlib search Das Kapital -l en
+/zlib download 1
+```
+
+> **Note**: the official domains require browser verification that some egress IPs cannot pass, in which case the plugin switches to the built-in mirrors automatically; `/zlib diag` shows which mirrors are reachable right now.
 
 ---
 
-## Feature Overview
+## Preview
 
-### Book Search
-Just say in the chat what book you are looking for; the LLM automatically calls the search tool and returns an **HTML card image** (cover/title/author/format/size) plus a text list with ids:
+What `/zlib search 资本论 -l zh` actually returns; the card footer shows how to ask for details, download and paging:
 
-```
-User: Find "Das Kapital" by Karl Marx
-🤖 → zlib_search_books(query=Das Kapital)
-    Found N matches for "Das Kapital", card image sent ✅
-```
-
-### Book Download
-Say the word and it downloads; the file is sent to the conversation automatically:
-
-```
-User: Download book #1
-🤖 → zlib_download_book(book_id=<id from search results>)
-    Download complete ✅ PDF file sent, account quota remaining: 9
-```
-
-### Account Pool & Quota Management
-- Configure multiple Z-Library accounts, each with an **independent daily download quota** (about 10/day for free accounts)
-- On download, it automatically rotates to the account with the **most quota left today**; when all are exhausted, the request is declined with a friendly message
-- Two credential methods are supported: `email+password` or `remix_userid+remix_userkey`
-
-### HTML Card Results
-Search results are rendered into uniform card images (Z-Library cover + metadata badges); failed cover loads automatically fall back to a gradient placeholder, so cards are never blank.
-
-### Error Classification
-IP rate limiting / invalid domain / expired login / exhausted quota / network errors are all handled by category and translated into friendly messages; a single error never crashes the plugin.
+![Search result card preview](docs/card-preview.jpg)
 
 ---
 
-## Quick Start
+## Commands
 
-### Step 1: Installation
+Command group `/zlib`, alias `/zl`. The sub-commands also accept Chinese names (`搜索`, `下一页`, `上一页`, `下载`, `状态`, `诊断`, `帮助`).
 
-AstrBot WebUI → Plugin Marketplace → install `astrbot_plugin_zlibrary_assistant` from GitHub
+| Command | Description |
+|---------|-------------|
+| `/zlib search keywords [-l language] [-e extension] [-n count]` | Search, e.g. `/zlib search Das Kapital -l en -e pdf`. Aliases `s`, `search` |
+| `/zlib next` / `/zlib prev` | Page through the latest search. Aliases `n`, `p` |
+| `/zlib detail index-or-id` | Full information for one book: publisher, pages, series, categories and description. Aliases `d`, `detail` |
+| `/zlib download index-or-id` | The index refers to the latest results of the current session; a number larger than the page size is treated as a book id. Aliases `dl`, `download` |
+| `/zlib 3` | Shorthand for `/zlib download 3` (`/zl 3` works too) |
+| `/zlib status` | Account login state and today's quota (admins only) |
+| `/zlib diag` | Probes every mirror for reachability and latency and checks account logins (admins only) |
+| `/zlib help` | Command help |
 
-### Step 2: Minimal Configuration (get search & download running)
-
-Just add one account under `accounts` on the plugin configuration page in the WebUI (remix method recommended):
-
-1. Open the plugin configuration page → click add entry under `accounts`
-2. **Recommended method**: fill in `remix_userid` + `remix_userkey` (after logging into z-library.sk in your browser, press F12 → copy from Cookies; valid long-term and unaffected by login endpoint risk control)
-3. Or fill in `email` + `password` (remix credentials are exchanged automatically after login)
-4. To use multiple accounts, keep adding entries (the account pool rotates automatically)
-
-After saving, restart AstrBot and you can search and download books directly in the conversation.
-
-> **Note**: Servers in mainland China need a proxy in `proxy` (e.g. `http://127.0.0.1:7897`); servers outside China can leave it empty. If you want to use a stable onion entrance, see the [Tor/onion Deployment](#toronion-deployment).
-
-### Dependencies
-The plugin depends on `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow`; AstrBot handles them automatically when installing the plugin, no extra steps needed.
+The language option accepts `zh`, `en`, `chinese`, `english` and similar. Searching does not spend download quota; with `download_admin_only` on, only admins may download.
 
 ---
 
-## Tor/onion Deployment
+## LLM tools
 
-Optionally, the plugin can reach the Z-Library onion E-API through Tor while keeping full backward compatibility with the existing clearnet domain and HTTP proxy settings. It provides the same 3 LLM tools:
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `zlib_search_books` | `query` (required), `limit`, `page`, `language`, `extension` | Search; the plugin sends the result card itself and hands the model a text list with ids and descriptions |
+| `zlib_download_book` | `book_id` (required) | Download by search-result id; called only when the user explicitly asks; the plugin sends the file |
+| `zlib_get_status` | none | Account pool status; admin sessions only |
 
-- `zlib_search_books`: search books
-- `zlib_download_book`: download by search-result id
-- `zlib_get_status`: check accounts and quota (admin sessions only)
+```
+User: Find me Marx's "Das Kapital", English PDF
+Model calls: zlib_search_books(query="Das Kapital", language="en", extension="pdf")
+User: Download the first one
+Model calls: zlib_download_book(book_id=<id from the search results>)
+```
 
-Network requests enter Tor via SOCKS5, and `.onion` DNS resolution happens on the Tor side. The plugin provides no arbitrary-URL browsing tool, so a prompt injection cannot turn the bot into an open proxy.
+Fence markers are stripped from book fields and the fields are truncated before they enter a tool result, reducing the risk of instructions hidden in a title. Messages a tool call needs to deliver (the result card, the downloaded file) are sent by the plugin itself, so the model only describes the outcome and never handles local paths.
 
-### Docker deployment
+---
 
-1. Install `astrbot_plugin_zlibrary_assistant` as usual.
-2. Merge the following `tor` service into AstrBot's `docker-compose.yml` (do not publish port 9050 to the public internet):
+## Mirrors and failover
+
+- Built-in domains are tried in this order initially, then re-ranked automatically by observed results (recently working ones first, lower latency preferred): the official entries `z-library.sk`, `z-lib.sk`, `z-library.im`, `z-library.hn` first, then the mirrors `z-lib.by`, `z-library.website`, `z-lib.gd`, `z-lib.gl`, `article.sk`, `articles.sk`, `z-library.qa`, `zlib.bz`.
+- Requests carry the `source: android` header to the mirrors' E-API. Network errors, certificate errors, browser-verification blocks, Cloudflare blocks and rate limiting trigger failover and put that mirror on a cooldown that depends on the error type.
+- Domains in `domains` have the highest priority, followed by the built-in mirrors; domains learned from a mirror come last and serve only requests without account credentials.
+- Whether a mirror is reachable depends on your egress network; rely on the result of `/zlib diag`.
+
+---
+
+## Configuration
+
+### Account settings
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `accounts` | template_list | `[]` | Account pool, one entry per account; when both remix and email/password are set, remix wins |
+| `accounts[].label` | string | `account` | Account label for logs and status |
+| `accounts[].remix_userid` | string | `""` | remix_userid (recommended, paired with remix_userkey) |
+| `accounts[].remix_userkey` | string | `""` | remix_userkey (recommended) |
+| `accounts[].email` | string | `""` | Account email (fallback, paired with the password) |
+| `accounts[].password` | string | `""` | Account password (fallback) |
+
+### Connection settings
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `domains` | list | `[]` | Extra mirror domains, host names only; onion addresses need a SOCKS proxy |
+| `proxy` | string | `""` | HTTP or SOCKS proxy, e.g. `http://127.0.0.1:7890` |
+| `max_download_mb` | int | `80` | Maximum size of one download (MiB, 1-512) |
+
+### Search and download settings
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `search_limit` | int | `5` | Default number of search results (1-10) |
+| `card_enabled` | bool | `true` | Show search results as a card image; with it off, or if rendering fails, a text list is sent |
+| `download_admin_only` | bool | `false` | Only admins may download |
+
+### Quick configuration template
+
+`data/config/astrbot_plugin_zlibrary_assistant_config.json`:
+
+```json
+{
+  "accounts": [
+    {"label": "account1", "remix_userid": "", "remix_userkey": "", "email": "", "password": ""}
+  ],
+  "domains": [],
+  "proxy": "",
+  "max_download_mb": 80,
+  "search_limit": 5,
+  "card_enabled": true,
+  "download_admin_only": false
+}
+```
+
+---
+
+## Tor/onion deployment
+
+The plugin can reach an onion entry through Tor: a `.onion` domain requires a SOCKS proxy, and DNS resolution happens on the Tor side. The plugin offers no arbitrary-URL browsing, so a prompt-injected bot cannot act as an open proxy.
+
+### Docker
+
+1. Merge this `tor` service into AstrBot's `docker-compose.yml` (do not publish port 9050):
 
 ```yaml
 services:
   tor:
     build: ./data/plugins/astrbot_plugin_zlibrary_assistant/docker/tor
     restart: unless-stopped
-    # If Tor needs to reach the public internet through your existing proxy, enable according to its actual type:
+    # Enable only if Tor must go through an existing proxy:
     # environment:
     #   - TOR_UPSTREAM_PROXY=http://proxy-host:port
 ```
 
-3. Make sure AstrBot and `tor` share the same Compose network, then rebuild and start:
-
-```bash
-docker compose up -d --build tor astrbot
-```
-
-4. Fill in the plugin configuration in AstrBot:
+2. Put AstrBot and `tor` on the same Compose network, then run `docker compose up -d --build tor astrbot`.
+3. Configure the plugin (confirm for yourself that the onion address is currently alive):
 
 ```json
 {
-  "domain": "http://loginzlib2vrak5zzpcocc3ouizykn6k5qecgj2tzlnab5wcbqhembyd.onion",
-  "proxy": "socks5://tor:9050",
-  "max_download_mb": 80,
-  "search_limit": 5,
-  "accounts": []
+  "domains": ["http://loginzlib2vrak5zzpcocc3ouizykn6k5qecgj2tzlnab5wcbqhembyd.onion"],
+  "proxy": "socks5://tor:9050"
 }
 ```
 
-A plain HTTP/SOCKS proxy is not an onion router and cannot replace Tor. The plugin always connects to `socks5://tor:9050`; if Tor itself needs an upstream proxy, configure `TOR_UPSTREAM_PROXY=http://proxy-host:port` or `TOR_UPSTREAM_PROXY=socks5://proxy-host:port` according to the actual protocol of your existing service. Fill in the upstream service's name, address, and port according to your actual deployment.
+An ordinary HTTP/SOCKS proxy is not an onion router and cannot replace Tor.
 
-Account configuration is the same as before. `remix_userid` + `remix_userkey` is recommended to avoid frequent calls to the login endpoint.
+### Without Docker
 
-### Non-Docker deployment
-
-Install and start Tor with its SOCKS port listening on localhost only, then set `proxy` to `socks5://127.0.0.1:9050`. If AstrBot runs in Docker and Tor on the host, Docker Desktop usually uses `socks5://host.docker.internal:9050`; you also need Tor to listen on an interface reachable from Docker and to restrict sources with a firewall.
+Install and start Tor with the SOCKS port listening on localhost only, and set `proxy` to `socks5://127.0.0.1:9050`. With AstrBot in Docker and Tor on the host, Docker Desktop usually uses `socks5://host.docker.internal:9050`; Tor must then listen on an interface Docker can reach, with a firewall limiting the sources.
 
 ### Security constraints
 
-- Only HTTP/HTTPS is accepted; `.onion` must be a 56-character v3 address.
-- `.onion` requests must go through a SOCKS proxy; local DNS resolution is forbidden.
-- Every hop of API-returned redirects is re-checked by the SSRF validation.
-- A single download defaults to at most 80 MiB to prevent abnormal responses from exhausting memory.
-- The Tor service does not publish host ports; it is only for the internal Compose network.
-
-### Verification
-
-```bash
-python -m pytest -q
-```
-
-Actual connectivity also depends on whether Tor has finished bootstrapping, whether the target onion is online, and whether the account credentials are valid.
-
----
-
-## Configuration Reference
-
-### Account Settings
-
-| Configuration Key | Type | Default | Description |
-|--------|------|------|------|
-| `accounts` | template_list | `[]` | Z-Library account pool, one account per entry. Recommended: `remix_userid`+`remix_userkey` (as a pair), or `email`+`password` |
-| `accounts[].name` | string | `account` | Account label (used to distinguish accounts in logs) |
-| `accounts[].email` | string | `""` | Account email (paired with password) |
-| `accounts[].password` | string | `""` | Account password |
-| `accounts[].remix_userid` | string | `""` | remix_userid (paired with remix_userkey, recommended) |
-| `accounts[].remix_userkey` | string | `""` | remix_userkey (recommended) |
-
-### Connection Settings
-
-| Configuration Key | Type | Default | Description |
-|--------|------|------|------|
-| `domain` | string | `z-library.sk` | Z-Library E-API domain or full base URL. Plain domains use HTTPS by default; you can also enter `http://...onion` |
-| `proxy` | string | `""` | HTTP or SOCKS proxy (optional). onion addresses must use Tor SOCKS, e.g. `socks5://tor:9050` |
-| `max_download_mb` | int | `80` | Maximum size of a single downloaded file (MiB, range 1-512) |
-
-### Search Settings
-
-| Configuration Key | Type | Default | Description |
-|--------|------|------|------|
-| `search_limit` | int | `5` | Default maximum number of search results (used when the LLM does not specify; range 1-8) |
-
-### Quick Configuration Template
-
-Fill it in on the WebUI configuration panel, or refer to the following structure (`data/config/astrbot_plugin_zlibrary_assistant_config.json`):
-
-```json
-{
-  "accounts": [
-    {
-      "name": "account",
-      "email": "",
-      "password": "",
-      "remix_userid": "",
-      "remix_userkey": ""
-    }
-  ],
-  "domain": "z-library.sk",
-  "proxy": "",
-  "max_download_mb": 80,
-  "search_limit": 5
-}
-```
-
----
-
-## LLM-Callable Tools
-
-The plugin registers 3 LLM tools; the model decides automatically when to call them — you only need to state your needs in natural language:
-
-```
-User: Find "Das Kapital" by Karl Marx
-🤖 → zlib_search_books(query=Das Kapital)
-    Found N matches for "Das Kapital", card image sent ✅
-
-User: Download book #1
-🤖 → zlib_download_book(book_id=123456)
-    Download complete ✅ PDF file sent, account quota remaining: 9
-
-User: How many more books can I download today?
-🤖 → zlib_get_status()
-    Z-Library account pool status: account1 ✅ OK, 1/10 downloads used today
-```
-
-### zlib_search_books
-Keyword search across the Z-Library book library; returns a card image + a text list with ids. Searching does **not** consume download quota.
-
-| Parameter | Type | Description |
-|------|------|------|
-| `query` | string | **Required**, search keywords (title/author/topic, Chinese and English supported) |
-| `limit` | int? | Maximum number of results (if omitted, the configured `search_limit` is used, max 8) |
-| `language` | string? | Language filter, e.g. `zh` / `en` / `fr` |
-| `extension` | string? | Format filter, e.g. `pdf` / `epub` / `mobi` |
-
-### zlib_download_book
-Downloads a book by its search-result id and saves it locally. **Only called when the user explicitly requests a download**; consumes the account's daily quota.
-
-| Parameter | Type | Description |
-|------|------|------|
-| `book_id` | int | **Required**, book id (from the numbered list returned by zlib_search_books) |
-
-### zlib_get_status
-Queries the login status and remaining daily download quota of each account in the pool. **Admin sessions only** (the result contains account-pool internals).
-
-| Parameter | Type | Description |
-|------|------|------|
-| (no parameters) | - | - |
+- Only HTTP/HTTPS; `.onion` must be a 56-character v3 address and requires a SOCKS proxy.
+- Every redirect hop of API calls and downloads is re-checked for SSRF.
+- The Tor service publishes no host port and is meant for the Compose network only.
 
 ---
 
 ## Architecture
 
-### eapi client (zlib_client.py)
-An async wrapper around the internal interface of the Z-Library Android client (unofficial E-API):
-- Based on aiohttp, following AstrBot development conventions (async, no requests)
-- Account pool: independent quota state per account; downloads automatically pick the account with the most quota left
-- Error classification: `rate_limited` / `auth_failed` / `quota_exhausted` / `domain_invalid` / `network_error` / `api_error`
-- Book cache persisted to disk; books can still be downloaded directly by id after AstrBot restarts
-- Mojibake repair: double-encoded text returned by Z-Library is automatically restored
-- Domain auto-normalization (adds `https://` for scheme-less plain domains and `http://` for onion; addresses with a path are rejected); download filenames are automatically sanitized of Windows-illegal characters
+| Module | Responsibility |
+|--------|----------------|
+| `zlib_transport.py` | aiohttp transport: headers, manual same-origin redirects and cookie merging, response classification, bounded reads, guarded download GET (SSRF and peer verification) |
+| `zlib_domains.py` | Mirror pool: user / built-in / learned tiers, cooldowns, failover, batch probing |
+| `zlib_client.py` | E-API client: account pool login, search, download links, cover fetching, streaming downloads, status and diagnosis |
+| `zlib_service.py` | Business layer shared by commands and tools: search, card, index resolution, saving downloads |
+| `zlib_cards.py` | Card HTML template and render data (every book field explicitly escaped) |
+| `zlib_models.py` | Book, search-result and account models, plus the book-line and detail text handed to the model |
+| `zlib_store.py` | Persistent book cache and per-session search memory |
+| `zlib_format.py` | Command argument parsing and text formatting |
+| `zlib_text.py` | Mojibake repair, filename sanitizing, description cleaning and capping, cover resizing |
+| `zlib_security.py` | SSRF checks: private-address detection, second DNS check, onion address rules |
+| `zlib_errors.py` | Error categories and which ones trigger failover |
+| `zlib_paths.py` | Plugin data directory |
+| `tools/` | The three LLM tools |
 
-### Tool layer (tools/)
-Three `FunctionTool`s registered via `add_llm_tools`; the LLM recognizes and calls them automatically in conversation:
-- `search_tool.py` — search + HTML card rendering (automatically falls back to plain text if rendering fails)
-- `download_tool.py` — downloads by id to `<data>/plugin_data/zlibrary_assistant/books/` and returns the absolute path
-- `status_tool.py` — account pool health query
-
-### Card rendering (templates.py)
-HTML + Jinja2 templates, using AstrBot's built-in text-to-image (`html_renderer`):
-- CSS font stack; cloud rendering selects Chinese fonts automatically, no dependence on local fonts
-- Covers are downloaded by the plugin and **embedded as base64** (the cloud renderer never needs to access Z-Library external links); a gradient placeholder shows automatically if the download fails
-- Titles truncated to two lines, authors ellipsized on one line, stable layout for long lists
+Downloads are saved under `<data>/plugin_data/zlibrary_assistant/books/` and kept for 7 days.
 
 ---
 
 ## FAQ
 
-### Q1: In Docker deployments, Chinese characters in search-result card images turn into boxes/mojibake?
+### Q1: Every mirror is unavailable, or "DiamWall verification blocked"?
 
-**Cause**: AstrBot's "text-to-image" has two paths — cloud rendering (default; fonts live in the cloud, no local fonts needed) and local rendering (automatic fallback when the cloud fails, rendered with Pillow). Local rendering requires Chinese fonts in the system, but the official AstrBot image (`python:3.12-slim`) **has no Chinese fonts preinstalled**; when Pillow cannot find a font it falls back to a built-in bitmap font, and all Chinese becomes boxes.
+Run `/zlib diag` first. The official main domains require browser verification that scripts cannot pass; whether a mirror is reachable depends on your egress IP, and switching proxy node often helps. You can also add mirrors you have verified yourself under `domains`.
 
-**Fix** (choose one):
-1. Add one line to the Dockerfile (recommended; takes effect after rebuilding the image):
-   ```dockerfile
-   RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk
-   ```
-2. Install directly in the running container:
-   ```bash
-   docker exec -it <container_name> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"
-   ```
-3. Without installing packages, put any Chinese font file (e.g. Microsoft YaHei `msyh.ttc`) into AstrBot's `data/` directory and name it `font.ttf`:
-   ```bash
-   docker cp msyh.ttc <container_name>:/AstrBot/data/font.ttf
-   ```
+### Q2: "Rate limited"?
 
-### Q2: It says "Z-Library is rate-limiting the current IP"?
+The site applies risk control to request frequency and shared egress IPs. Switch proxy node or slow down; the affected mirror cools down automatically and other mirrors take over meanwhile.
 
-Z-Library applies strict frequency control (error code `#ipd3`); shared proxy IPs (e.g. so-called "airport" proxy-subscription nodes) are easily flagged. Solutions:
-- Switch proxy nodes (switch nodes in Clash/V2Ray)
-- Or reduce the request frequency over short periods
-- The plugin classifies this error into a friendly message, does not crash, and recovers automatically after cooldown
+### Q3: Download says "quota exhausted" or "no account configured"?
 
-### Q3: It says "the current domain may be invalid"?
+Free accounts have a limited number of downloads per day (see the account status). Wait for the daily reset or add more accounts under `accounts`.
 
-Z-Library domains are frequently seized/changed (in practice, about half of the commonly used domains are already dead). Solution: change the `domain` entry in the plugin configuration to a currently working domain (e.g. `z-library.sk`, **no `https://` prefix needed**). You can verify availability by visiting `https://<domain>/eapi/info` first (returning JSON means it works).
+### Q4: Email/password login fails?
 
-### Q4: Downloads say "the account pool quota is used up"?
+The login endpoint is often rejected on its own by risk control. Use `remix_userid` + `remix_userkey` instead (see [Minimal configuration](#minimal-configuration)).
 
-Free Z-Library accounts have a limited number of daily downloads (about 10/day). Solutions:
-- Wait for the quota to reset the next day
-- Add more accounts in the `accounts` configuration (the pool automatically rotates to the account with the most quota left)
+### Q5: Chinese text in the result image appears as boxes?
 
-### Q5: Login keeps reporting "IP rate-limited" (#ipd3), but the website is accessible?
+AstrBot's text-to-image prefers cloud rendering and falls back to local rendering, which needs a system CJK font that the official image does not ship. Fix (any one):
 
-**Cause**: Z-Library has separate risk control on the **login endpoint** (stricter than read-only endpoints); shared "airport" (proxy-subscription) IPs are easily flagged. Read-only interfaces like `/eapi/info` remain accessible, but `email+password` login is rejected.
+1. Add to the Dockerfile: `RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk`
+2. In a running container: `docker exec -it <container> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"`
+3. Copy any CJK font to `data/font.ttf`: `docker cp msyh.ttc <container>:/AstrBot/data/font.ttf`
 
-**Fix**: switch to the **`remix_userid` + `remix_userkey`** method (does not go through the login endpoint, only does a GET verification, essentially unaffected by this risk control):
-1. After you have successfully logged into Z-Library at least once, obtain these two values from the profile page/client
-2. Fill `remix_userid` and `remix_userkey` in the plugin's `accounts` configuration (leave email/password empty)
-3. The plugin will verify via GET `/eapi/user/profile`, and search/download will work normally
+### Q6: Slow searches or placeholder covers in Docker?
 
-> **Tip**: `remix_userkey` is valid long-term; configure it once and it keeps working.
-
-### Q6: Download completes but the file cannot be sent, with "Sandbox runtime is disabled by configuration"?
-
-**Cause**: Sending local files via AstrBot's `send_message_to_user` depends on the **Computer Use local runtime** (`computer_use_runtime`), which defaults to `none` in AstrBot, so local files are blocked by the sandbox.
-
-**Fix** (WebUI or config file, either one):
-1. **WebUI**: `Configuration (Config) → Service Provider Settings → computer_use_runtime` change to `local` (you can also set `computer_use_require_admin` to `false`)
-2. **Config file**: edit `data/config/astrbot_config.json` (create it if it does not exist):
-   ```json
-   {
-     "provider_settings": {
-       "computer_use_runtime": "local",
-       "computer_use_require_admin": false
-     }
-   }
-   ```
-   Restart AstrBot after saving.
-
-### Q7: Which dependencies need to be configured?
-
-The plugin depends on `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow`; AstrBot handles them automatically when installing the plugin. Text-to-image uses AstrBot's built-in capability, nothing extra to install.
-
-### Q8: In Docker deployments, search is slow / all card covers are placeholders / the tool reports timeout?
-
-**Cause**: A Docker container is an isolated network environment; `http://127.0.0.1:7897` in the configuration points to **the container itself** (your proxy is not inside it), so all cover downloads fail (placeholders are shown), and the cloud text-to-image may be unreachable from within the container, rendering eating up the entire tool timeout (AstrBot default `tool_call_timeout` is 120 seconds).
-
-**Fix**:
-1. **Fill in a proxy address the container can reach**: format `http://IP:port`; if the proxy requires credentials, use `http://username:password@IP:port` (e.g. `http://user:pass@IP:port`); the plugin is based on aiohttp and automatically sends the `Proxy-Authorization` authentication header. On Windows/Mac Docker Desktop you can use `http://host.docker.internal:port`; on Linux use the host's LAN IP, and make sure the proxy software enables "allow LAN connections"
-2. If the cloud text-to-image is unreachable: the plugin has a built-in **25-second rendering timeout protection**; on rendering failure it automatically falls back to a plain-text book list (the whole tool does not error out), so no action is needed if that is acceptable
-3. If time is still tight: increase AstrBot's `agent_runner.config.misc.tool_call_timeout` (e.g. `240`)
+A container is its own network: `http://127.0.0.1:port` points at the container itself. Set `proxy` to an address the container can reach: `http://host.docker.internal:port` on Docker Desktop, or the host's LAN IP on Linux with "allow LAN" enabled in the proxy software; with authentication use `http://user:pass@IP:port`. If cloud text-to-image is unreachable, rendering has a 25-second timeout and falls back to a text list; if time is still tight, raise `agent_runner.config.misc.tool_call_timeout`.
 
 ## Changelog
 
-> **[View the full changelog →](CHANGELOG.md)**
+> **[Read the full changelog →](CHANGELOG.md)**
 
-## Support & Acknowledgements
+## Support and credits
 
-If this plugin helps you, please consider giving it a Star; for issues and suggestions, feel free to open an [Issue](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues) or a [Pull Request](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/pulls).
+If this plugin helps you, a Star is welcome. Please file questions and suggestions as an [Issue](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues) or [Pull Request](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/pulls).
 
 - [AstrBot](https://github.com/AstrBotDevs/AstrBot) open-source chatbot framework
 
-## License & Author
+## License and author
 
-This project is released under the **MIT License**.
+Released under the **MIT License**.
 
 [@OMSociety](https://github.com/OMSociety)

@@ -10,6 +10,58 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-27
+
+### 新增
+
+- **`/zlib` 指令组**（别名 `/zl`）：`搜索`（支持 `-l` 语言、`-e` 格式、`-n` 条数）、`详情`、`下一页`、`上一页`、`下载`（按序号或书籍 id）、`状态`、`诊断`、`帮助`；序号取自当前会话最近一次搜索结果。`/zlib 3` 是 `/zlib 下载 3` 的简写。
+- **`/zlib 详情`**：查看一本书的出版社、页数、丛书、版次、分类与简介。
+- **镜像域名池与自动故障转移**：内置官方入口（`z-library.sk`、`z-lib.sk`、`z-library.im`、`z-library.hn`）优先、其后一组可直连镜像；网络错误、证书错误、浏览器验证拦截、Cloudflare 拦截、限流都会触发换镜像，并按错误类型冷却。可从镜像的 `/eapi/info/domains` 学习新域名（至多 8 个，仅承接匿名请求，带账号凭证的请求只发往内置与用户配置的镜像）。
+- **`/zlib 诊断`**：探测每个镜像的可达性与延迟，并检查账号登录。
+- **配置项**：`domains`（额外镜像）、`card_enabled`（卡片图片开关）、`download_admin_only`（下载仅管理员）。
+- **`zlib_search_books` 新增 `page` 参数**，搜索结果按会话记忆，支持翻页与按序号下载。
+- 响应分类新增 `diamwall_blocked`、`cloudflare_blocked`、`tls_error`、`all_domains_failed`，错误提示给出对应处理方向。
+
+### 变更
+
+- **请求固定携带 `source: android` 头**，使镜像的 E-API 接受搜索请求。
+- **搜索无需账号**；下载才需要账号。登录改为惰性触发（带锁与冷却），插件加载时后台预热一次。
+- **账号凭证以 remix 为主**；下载按剩余额度循环账号，登录失效或额度耗尽自动换号，下载后刷新额度。
+- **搜索结果卡片重新设计**：构成主义配色（黑、红、米白），黑色抬头配关键词与页码、序号红黑交替的条列、按格式配色的标签、页脚操作提示；JPEG 质量由默认的 40 提升到 90。所有书目字段在模板中显式转义（渲染端不启用 Jinja2 autoescape）。
+- **工具交付内聚**：结果卡片与下载好的文件由插件直接发送，模型不再需要转述本地路径，也不依赖 `send_message_to_user` 的文件白名单与 `computer_use_runtime` 设置。
+- **搜索、翻页与额度查询限时 20 秒**：镜像不稳时逐个试域名会把一轮对话拖上几分钟，超时即回一句提示让人重试；卡片渲染单独限时 15 秒，超时按纯文本回退。
+- **搜索结果带简介进入模型上下文**：工具结果的书目行后附清洗过的简介（去 HTML、压行、限长），模型据此判断版本，不必反复搜索；下载进度改为流式写盘，完成后一次性汇报耗时与剩余额度。
+
+### 移除
+
+- 配置项 `domain` 由 `domains` 取代；默认域名改为内置的官方入口与镜像列表。升级后请重新核对配置。
+- 账号项的备注名字段由 `name` 改名为 `label`：该项原与模板名共用同一个 i18n 键，导致备注名无法随语言本地化。升级后账号需要重新填写备注名，remix 与邮箱密码字段不受影响。
+
+### Added
+
+- **`/zlib` command group** (alias `/zl`): `search` (with `-l` language, `-e` extension, `-n` count), `detail`, `next`, `prev`, `download` (by index or book id), `status`, `diag`, `help`; indexes refer to the latest search results of the current session. `/zlib 3` is shorthand for `/zlib download 3`.
+- **`/zlib detail`**: publisher, pages, series, edition, categories and description of one book.
+- **Mirror pool with automatic failover**: the built-in official entries (`z-library.sk`, `z-lib.sk`, `z-library.im`, `z-library.hn`) come first, followed by a set of directly reachable mirrors; network errors, certificate errors, browser-verification blocks, Cloudflare blocks and rate limiting all trigger a switch and a per-error-type cooldown. New domains can be learned from a mirror's `/eapi/info/domains` (at most 8, anonymous requests only; requests carrying account credentials go only to built-in and user-configured mirrors).
+- **`/zlib diag`**: probes every mirror for reachability and latency and checks account logins.
+- **Options**: `domains` (extra mirrors), `card_enabled` (card image switch), `download_admin_only` (admin-only downloads).
+- **`zlib_search_books` gains a `page` parameter**; search results are remembered per session for paging and index-based downloads.
+- New response categories `diamwall_blocked`, `cloudflare_blocked`, `tls_error`, `all_domains_failed`, each with an actionable message.
+
+### Changed
+
+- **Requests always carry the `source: android` header**, which the mirrors' E-API requires for search.
+- **Searching needs no account**; only downloading does. Login is lazy (locked, with a cooldown) and warmed up once in the background when the plugin loads.
+- **Account credentials prefer remix**; downloads loop over accounts by remaining quota, switching on login failure or exhausted quota, and refresh the quota afterwards.
+- **Search result card redesigned**: constructivist palette (black, red, cream), a black header carrying the query and page count, alternating red and black index columns, format-colored tags and a footer hint; JPEG quality raised from the default 40 to 90. Every book field is explicitly escaped in the template (the renderer does not enable Jinja2 autoescape).
+- **Tool delivery is self-contained**: the plugin sends the result card and the downloaded file itself, so the model no longer relays local paths and nothing depends on `send_message_to_user`'s file allow-list or on `computer_use_runtime`.
+- **Search, paging and quota checks are capped at 20 seconds**: when mirrors are flaky, trying them one by one used to drag a whole turn out for minutes; the cap replies with a hint to retry. Card rendering has its own 15-second cap and falls back to plain text.
+- **Descriptions reach the model with the search results**: each book line in a tool result is followed by a cleaned description (HTML stripped, single line, length-capped) so the model can tell editions apart instead of searching again; downloads stream to disk and report elapsed time and remaining quota once at the end.
+
+### Removed
+
+- The `domain` option is replaced by `domains`; the default domains are now the built-in official entries and mirror list. Re-check your configuration after upgrading.
+- The account label field is renamed from `name` to `label`: it shared an i18n key with the template name, so the label could not be localized. Re-enter the account labels after upgrading; remix and email/password fields are unaffected.
+
 ## [1.1.2] - 2026-11-16
 
 ### 修复
