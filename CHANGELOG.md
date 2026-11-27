@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 新增
 
 - **`/zlib` 指令组**（别名 `/zl`）：`搜索`（支持 `-l` 语言、`-e` 格式、`-n` 条数）、`下一页`、`上一页`、`下载`（按序号或书籍 id）、`状态`、`诊断`、`帮助`；序号取自当前会话最近一次搜索结果。
-- **镜像域名池与自动故障转移**：内置一组可直连镜像，按延迟排序；网络错误、证书错误、浏览器验证拦截、Cloudflare 拦截、限流都会触发换镜像，并按错误类型冷却。可从镜像的 `/eapi/info/domains` 学习新域名（至多 8 个，仅承接匿名请求，带账号凭证的请求只发往内置与用户配置的镜像）。
+- **镜像域名池与自动故障转移**：内置官方入口（`z-library.sk`、`z-lib.sk`、`z-library.im`、`z-library.hn`）优先、其后一组可直连镜像；网络错误、证书错误、浏览器验证拦截、Cloudflare 拦截、限流都会触发换镜像，并按错误类型冷却。可从镜像的 `/eapi/info/domains` 学习新域名（至多 8 个，仅承接匿名请求，带账号凭证的请求只发往内置与用户配置的镜像）。
 - **`/zlib 诊断`**：探测每个镜像的可达性与延迟，并检查账号登录。
 - **配置项**：`domains`（额外镜像）、`card_enabled`（卡片图片开关）、`download_admin_only`（下载仅管理员）。
 - **`zlib_search_books` 新增 `page` 参数**，搜索结果按会话记忆，支持翻页与按序号下载。
@@ -30,12 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 移除
 
-- 配置项 `domain` 由 `domains` 取代；官方主域（如 `z-library.sk`）启用浏览器验证，脚本无法直连，不再作为默认入口。升级后请重新核对配置。
+- 配置项 `domain` 由 `domains` 取代；默认域名改为内置的官方入口与镜像列表。升级后请重新核对配置。
 
 ### Added
 
 - **`/zlib` command group** (alias `/zl`): `search` (with `-l` language, `-e` extension, `-n` count), `next`, `prev`, `download` (by index or book id), `status`, `diag`, `help`; indexes refer to the latest search results of the current session.
-- **Mirror pool with automatic failover**: a built-in set of directly reachable mirrors ranked by latency; network errors, certificate errors, browser-verification blocks, Cloudflare blocks and rate limiting all trigger a switch and a per-error-type cooldown. New domains can be learned from a mirror's `/eapi/info/domains` (at most 8, anonymous requests only; requests carrying account credentials go only to built-in and user-configured mirrors).
+- **Mirror pool with automatic failover**: the built-in official entries (`z-library.sk`, `z-lib.sk`, `z-library.im`, `z-library.hn`) come first, followed by a set of directly reachable mirrors; network errors, certificate errors, browser-verification blocks, Cloudflare blocks and rate limiting all trigger a switch and a per-error-type cooldown. New domains can be learned from a mirror's `/eapi/info/domains` (at most 8, anonymous requests only; requests carrying account credentials go only to built-in and user-configured mirrors).
 - **`/zlib diag`**: probes every mirror for reachability and latency and checks account logins.
 - **Options**: `domains` (extra mirrors), `card_enabled` (card image switch), `download_admin_only` (admin-only downloads).
 - **`zlib_search_books` gains a `page` parameter**; search results are remembered per session for paging and index-based downloads.
@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- The `domain` option is replaced by `domains`; the official main domains (e.g. `z-library.sk`) require browser verification and cannot be reached by scripts, so they are no longer the default entry. Re-check your configuration after upgrading.
+- The `domain` option is replaced by `domains`; the default domains are now the built-in official entries and mirror list. Re-check your configuration after upgrading.
 
 ## [1.1.2] - 2026-11-16
 

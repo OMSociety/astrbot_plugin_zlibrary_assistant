@@ -37,7 +37,7 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 /zlib 下载 1
 ```
 
-> **提示**：官方主域（如 `z-library.sk`）启用了浏览器验证，脚本无法通过，插件使用内置镜像；`/zlib 诊断` 可查看各镜像当前是否可达。
+> **提示**：官方域名启用了浏览器验证，部分出口 IP 无法通过，此时插件自动转到内置镜像；`/zlib 诊断` 可查看各镜像当前是否可达。
 
 ---
 
@@ -79,7 +79,7 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 
 ## 镜像域名与故障转移
 
-- 内置镜像：`z-lib.by`、`z-library.website`、`z-lib.gd`、`z-lib.gl`、`article.sk`、`articles.sk`、`z-library.qa`、`zlib.bz`。
+- 内置域名按顺序尝试：官方入口 `z-library.sk`、`z-lib.sk`、`z-library.im`、`z-library.hn` 优先；其后是镜像 `z-lib.by`、`z-library.website`、`z-lib.gd`、`z-lib.gl`、`article.sk`、`articles.sk`、`z-library.qa`、`zlib.bz`。
 - 请求带 `source: android` 头访问镜像的 E-API；网络错误、证书错误、浏览器验证拦截、Cloudflare 拦截、限流都会触发故障转移，并让该镜像按错误类型冷却一段时间。
 - `domains` 中填写的域名优先级最高；其后是内置镜像；从镜像学到的域名排在最后，且只用于不带账号凭证的搜索请求。
 - 镜像能否访问取决于你的出口网络，请以 `/zlib 诊断` 的结果为准。

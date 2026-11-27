@@ -23,9 +23,14 @@ from .zlib_security import is_safe_public_url
 
 T = TypeVar("T")
 
-# 内置镜像：实测直连返回 E-API JSON（未启用 DiamWall）的域名；会随站点变化，
-# 失效时靠 `domains` 配置项与接口学习补充
+# 内置域名：前四个是官方入口，优先尝试（部分出口 IP 能通过其浏览器验证，不能通过的
+# 会按 DiamWall 冷却后自动转到镜像）；其后是实测直连返回 E-API JSON 的镜像。
+# 域名会随站点变化，失效时靠 `domains` 配置项与接口学习补充
 BUILTIN_MIRRORS: tuple[str, ...] = (
+    "z-library.sk",
+    "z-lib.sk",
+    "z-library.im",
+    "z-library.hn",
     "z-lib.by",
     "z-library.website",
     "z-lib.gd",
@@ -50,7 +55,7 @@ _DEFAULT_COOLDOWN = 120.0
 # 限流后换域名前的退避（秒）；同一出口 IP 的限流换域名通常无效，先缓一缓
 _RATE_LIMIT_BACKOFF = 2.0
 
-MAX_ATTEMPTS = 4
+MAX_ATTEMPTS = 8
 MAX_LEARNED = 8
 
 TIER_USER, TIER_BUILTIN, TIER_LEARNED = 0, 1, 2

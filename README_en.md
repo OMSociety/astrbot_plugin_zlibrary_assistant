@@ -35,7 +35,7 @@ Search for "Zlibrary助手" in the AstrBot WebUI plugin market and install it.
 /zlib download 1
 ```
 
-> **Note**: the official main domains (e.g. `z-library.sk`) require browser verification that scripts cannot pass, so the plugin uses built-in mirrors; `/zlib diag` shows which mirrors are reachable right now.
+> **Note**: the official domains require browser verification that some egress IPs cannot pass, in which case the plugin switches to the built-in mirrors automatically; `/zlib diag` shows which mirrors are reachable right now.
 
 ---
 
@@ -77,7 +77,7 @@ Fence markers are stripped from book fields and the fields are truncated before 
 
 ## Mirrors and failover
 
-- Built-in mirrors: `z-lib.by`, `z-library.website`, `z-lib.gd`, `z-lib.gl`, `article.sk`, `articles.sk`, `z-library.qa`, `zlib.bz`.
+- Built-in domains are tried in order: the official entries `z-library.sk`, `z-lib.sk`, `z-library.im`, `z-library.hn` first, then the mirrors `z-lib.by`, `z-library.website`, `z-lib.gd`, `z-lib.gl`, `article.sk`, `articles.sk`, `z-library.qa`, `zlib.bz`.
 - Requests carry the `source: android` header to the mirrors' E-API. Network errors, certificate errors, browser-verification blocks, Cloudflare blocks and rate limiting trigger failover and put that mirror on a cooldown that depends on the error type.
 - Domains in `domains` have the highest priority, followed by the built-in mirrors; domains learned from a mirror come last and serve only requests without account credentials.
 - Whether a mirror is reachable depends on your egress network; rely on the result of `/zlib diag`.
