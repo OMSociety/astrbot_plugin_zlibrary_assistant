@@ -396,7 +396,7 @@ class TestDownloadTool:
         assert (component.name, component.file) == ("Book.pdf", str(saved))
         assert "- 书名：Title 1" in result
         assert "- 大小：2.0 MB" in result
-        assert "- 今日剩余额度：7 次" in result
+        assert "额度" not in result
         assert str(saved) not in result
         assert "send_message_to_user" not in result
 

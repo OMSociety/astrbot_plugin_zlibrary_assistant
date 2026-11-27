@@ -23,7 +23,6 @@ class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
     description: str = (
         "把 Z-Library 上的一本书下载并直接发给用户。"
         "只在用户明确表示要这本书（要文件、要下载、接受你推荐的版本）时调用，不要替用户擅自下载。"
-        "每次调用消耗一次账号的每日下载额度，额度由账号池共用。"
         "book_id 必须是 zlib_search_books 返回的 id；用户只说了书名没确认版本时，先搜索再问。"
         "文件由插件自己发给用户，你无需重发；下载成功后向用户说明发的是什么书即可。"
     )
@@ -71,6 +70,5 @@ class ZlibDownloadBookTool(FunctionTool[AstrAgentContext]):
             f"- 书名：{book.title or '未知'}\n"
             f"- 格式：{(book.extension or '').upper() or '未知'}\n"
             f"- 大小：{done.size / 1024 / 1024:.1f} MB\n"
-            f"- 今日剩余额度：{done.downloads_left} 次\n"
             "无需再让用户确认文件路径，也不要把本地路径写进回复。"
         )

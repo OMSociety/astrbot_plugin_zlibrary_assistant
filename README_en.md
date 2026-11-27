@@ -69,7 +69,7 @@ The language option accepts `zh`, `en`, `chinese`, `english` and similar. Search
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `zlib_search_books` | `query` (required), `limit`, `page`, `language`, `extension` | Search; the plugin sends the result card itself and hands the model a text list with ids and descriptions |
-| `zlib_download_book` | `book_id` (required) | Download by search-result id; spends quota; called only when the user explicitly asks; the plugin sends the file |
+| `zlib_download_book` | `book_id` (required) | Download by search-result id; called only when the user explicitly asks; the plugin sends the file |
 | `zlib_get_status` | none | Account pool status; admin sessions only |
 
 ```

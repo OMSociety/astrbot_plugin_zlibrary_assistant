@@ -1,4 +1,4 @@
-"""zlib_get_status 工具：查询账号池健康度与下载额度。"""
+"""zlib_get_status 工具：查询账号池健康度与今日下载次数。"""
 
 from __future__ import annotations
 
@@ -27,9 +27,9 @@ STALE_NOTE = "登录检查超时（镜像不稳），以下为本地记录的状
 class ZlibGetStatusTool(FunctionTool[AstrAgentContext]):
     name: str = "zlib_get_status"
     description: str = (
-        "查询 Z-Library 账号池状态：各账号登录是否正常、今日已用/剩余下载额度。"
+        "查询 Z-Library 账号池状态：各账号登录是否正常、今日下载次数。"
         "仅管理员会话可用。"
-        "当用户询问下载次数、额度、账号状态，或下载前想确认额度时调用。"
+        "仅当管理员主动询问账号状态时调用，下载前不要先调用它。"
     )
     parameters: dict = Field(
         default_factory=lambda: {"type": "object", "properties": {}}

@@ -71,7 +71,7 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `zlib_search_books` | `query`（必填）、`limit`、`page`、`language`、`extension` | 搜索，插件自动发出结果卡片，同时把带 id 与简介的文本书目交给模型 |
-| `zlib_download_book` | `book_id`（必填） | 按搜索结果 id 下载，消耗额度，仅在用户明确要求时调用；文件由插件发出 |
+| `zlib_download_book` | `book_id`（必填） | 按搜索结果 id 下载，仅在用户明确要求时调用；文件由插件发出 |
 | `zlib_get_status` | 无 | 账号池状态，仅管理员会话可用 |
 
 ```
