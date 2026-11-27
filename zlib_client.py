@@ -1,971 +1,370 @@
-"""Z-Library E-API 异步客户端（自研，基于 aiohttp）。
+"""Z-Library 客户端：账号池、搜索、下载、诊断。
 
-参考：
-- 端点文档: https://github.com/baroxyton/zlibrary-eapi-documentation
-- 实现参考: https://github.com/bipinkrish/Zlibrary-API（同步版，已按 AstrBot 规范改写为异步）
-
-设计要点：
-- 所有网络请求异步（aiohttp），符合 AstrBot 开发原则（禁止 requests）
-- 账号池：每个账号独立记录每日下载额度（downloads_today / downloads_limit）
-- 错误分类：统一抛 ZlibError，带 category 便于上层翻译成友好提示
-- SSRF 纵深防护：API 返回的封面/下载 URL 请求前经 zlib_security 校验
-  （IP 黑名单 + 重定向不自动跟随、手动逐跳校验，见 _guarded_get）
+请求经 ZlibTransport 发往 DomainPool 选出的镜像域名；基础设施类失败由域名池
+换域名重试，业务类失败（登录失效、额度用尽等）在这里按账号处理。
+搜索不需要登录（匿名可用）；下载需要账号。
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
-import io
 import json
-import os
 import re
-import warnings
+import time
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlparse
+from pathlib import Path
+from urllib.parse import urlparse
 
 import aiohttp
-from aiohttp_socks import ProxyConnector
 
-# 使用 AstrBot 插件 logger（与插件日志格式一致，避免 loguru record 缺字段）
 from astrbot.api import logger
-from PIL import Image
 
-from .zlib_paths import plugin_data_dir
-from .zlib_security import is_private_ip, is_safe_public_url
+from .zlib_domains import DomainPool, ProbeReport
+from .zlib_errors import ZlibError
+from .zlib_models import (
+    Account,
+    Book,
+    SearchResult,
+    normalize_extension,
+    normalize_language,
+)
+from .zlib_store import BookCache
+from .zlib_text import guess_image_mime, resize_cover, sanitize_filename
+from .zlib_transport import ZlibTransport, read_limited
 
-# 各端点（基础 URL 由配置提供；onion 通常使用 http://）
-EP_LOGIN = "/eapi/user/login"
 EP_PROFILE = "/eapi/user/profile"
+EP_LOGIN = "/eapi/user/login"
 EP_SEARCH = "/eapi/book/search"
 EP_FILE = "/eapi/book/{book_id}/{hash_id}/file"
+EP_DOMAINS = "/eapi/info/domains"
 
-# 书籍缓存上限（按写入顺序淘汰最旧条目），防止长期运行无限膨胀
-_MAX_BOOK_CACHE = 500
+# 同一账号两次登录尝试之间的最短间隔：凭据错误时避免每次请求都去撞登录端点
+LOGIN_RETRY_COOLDOWN = 60.0
 
-# 重定向不自动跟随（防公网 302 跳内网的 SSRF 放大），手动逐跳校验。
-# 两条路径的跳数上限分开：守链跟的是远端响应给出的任意 URL，每跳都要过
-# URL 校验与对端 IP 核验，深度多一跳就多放大一次"远端可控跳转"；API 通道
-# 跟的是配置域名内的同源跳转（跨主机直接拒），可以放宽到防护握手所需的深度。
-_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
-_MAX_GUARDED_REDIRECT_HOPS = 3
-_MAX_API_REDIRECT_HOPS = 5
+_AUTH_KEYWORDS = ("login", "password", "authoriz", "unauthor", "credential")
+_QUOTA_KEYWORDS = ("limit", "daily", "quota", "exceed")
 
-# E-API JSON 响应体读取上限：业务响应是 KB 级，上限防被投毒/劫持的端点返回
-# 无限流，把插件内存吃光
-_MAX_API_BYTES = 8 * 1024 * 1024
-
-# 封面解码像素预算：PIL 解码不可信字节时按声明的宽高分配内存，一张几十 KB 的
-# PNG 可以把 header 声明成几万 × 几万，解码即 OOM。同时开启 warnings->error，
-# 让 PIL 自身的 DecompressionBomb 阈值成为第二道闸
-_MAX_COVER_PIXELS = 40_000_000
-
-# Set-Cookie 名称的合法字符（RFC 6265 token）：用来区分 `name=value` 与属性
-_COOKIE_NAME_RE = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
-
-# 默认请求头（模拟浏览器，降低被风控概率）。
-# Content-Type 不放这里：POST 才有意义，GET 带表单类型头不严谨
-DEFAULT_HEADERS = {
-    "Accept": "application/json, text/plain, */*",
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    ),
-}
-
-# 错误分类（category）：
-#   network_error    网络异常（超时/连接失败/代理错误）
-#   rate_limited     IP 被 Z-Library 限流（Err #ipd3 等）
-#   auth_failed      账号凭据无效或登录失效
-#   quota_exhausted  账号池今日下载额度全部用完
-#   domain_invalid   域名失效（404 / CF 挑战页 / 重定向异常）
-#   api_error        eapi 返回的其他业务错误
-
-
-class ZlibError(Exception):
-    """Z-Library API 统一异常。"""
-
-    def __init__(self, category: str, message: str, detail: str = ""):
-        super().__init__(message)
-        self.category = category
-        self.message = message
-        self.detail = detail
-
-    def __str__(self) -> str:
-        return f"[{self.category}] {self.message}"
+MAX_PAGE_LIMIT = 50
 
 
 @dataclass
-class Account:
-    """账号池中的一个账号及其实时额度状态。"""
+class Diagnosis:
+    """诊断结果：镜像域名探测 + 账号状态。"""
 
-    name: str  # 配置中的备注名（如 account1）
-    email: str = ""
-    password: str = ""
-    remix_userid: str = ""
-    remix_userkey: str = ""
-    logged_in: bool = False
-    downloads_today: int = 0
-    downloads_limit: int = 10
-    last_error: str = ""
-
-    @property
-    def downloads_left(self) -> int:
-        return max(0, self.downloads_limit - self.downloads_today)
-
-    def has_quota(self) -> bool:
-        return self.downloads_left > 0
+    domains: list[ProbeReport]
+    accounts: list[dict]
+    proxy: str
 
 
-def _is_rate_limited(text: str) -> bool:
-    """识别 IP 限流响应。
-
-    只匹配明确的限流文案，不能加宽泛的 "Err #"——E-API 的业务错误
-    （文件不存在、参数错误等）也以 "Err #N" 开头，误判会让用户看到
-    "IP 被限流"的误导提示。
-    """
-    return "Too many requests" in text or "#ipd3" in text
-
-
-def _is_cf_challenge(text: str) -> bool:
-    """识别 Cloudflare 人机验证页。"""
-    return (
-        "Checking your browser" in text
-        or "cf-challenge" in text
-        or ("<html" in text.lower() and "challenge" in text.lower())
+def _classify_business_error(status: int, resp: dict, what: str) -> ZlibError:
+    error = str(resp.get("error") or resp.get("message") or "").strip()
+    lowered = error.lower()
+    detail = json.dumps(resp, ensure_ascii=False)[:200]
+    if status == 401 or any(k in lowered for k in _AUTH_KEYWORDS):
+        return ZlibError("auth_failed", f"{what}失败：账号未登录或凭据无效", detail)
+    if any(k in lowered for k in _QUOTA_KEYWORDS):
+        return ZlibError(
+            "quota_exhausted", f"{what}失败：账号今日下载额度已用完", detail
+        )
+    return ZlibError(
+        "api_error", f"{what}失败" + (f"：{error[:80]}" if error else ""), detail
     )
 
 
-def _fix_mojibake(text: str) -> str:
-    """修复 Z-Library 返回的双重编码文本。
-
-    现象：含重音字符的字段（如作者名 Frédéric）会变成 FrÃ©dÃ©ric，
-    原因是服务器端把 UTF-8 字节按 Latin-1 解码后又按 UTF-8 编码发送。
-
-    修复：尝试按 latin-1 编码回原始字节，再按 utf-8 解码。
-    仅当文本全部落在 Latin-1 范围内时才转换，中文等不受影响（会原样返回）。
-    """
-    try:
-        return text.encode("latin-1").decode("utf-8")
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        return text
+def _is_success(resp: dict) -> bool:
+    return resp.get("success") in (1, True, "1")
 
 
-def _fix_mojibake_recursive(obj):
-    """递归修复 JSON 结构中所有字符串的 mojibake（在 json.loads 之后调用）。"""
-    if isinstance(obj, str):
-        return _fix_mojibake(obj)
-    if isinstance(obj, list):
-        return [_fix_mojibake_recursive(item) for item in obj]
-    if isinstance(obj, dict):
-        return {key: _fix_mojibake_recursive(value) for key, value in obj.items()}
-    return obj
-
-
-def _sanitize_filename(filename: str) -> str:
-    """清洗文件名为跨平台安全格式。
-
-    书名可能含 Windows 非法字符（\\ / : * ? " < > |）或控制字符，
-    直接保存会触发 OSError；统一替换为下划线，并去掉首尾点/空格。
-    """
-    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", filename).strip(" .")
-    return cleaned or "book"
-
-
-def _guess_image_mime(content: bytes) -> str:
-    """按文件头魔数判断图片真实类型（比响应头 Content-Type 可靠）。
-
-    Z-Library 封面 CDN 常返回 application/octet-stream 或缺省类型，
-    若按响应头猜成 image/jpeg 而实际是 PNG，浏览器解码失败图片不显示。
-    """
-    if content.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if content.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if content.startswith((b"GIF87a", b"GIF89a")):
-        return "image/gif"
-    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
-        return "image/webp"
-    return "image/jpeg"
-
-
-def _resize_cover(content: bytes, max_width: int = 168) -> bytes:
-    """缩放封面并转 JPEG，压缩 base64 体积（卡片封面显示宽仅 84px，2x 清晰度 168px 足够）。
-
-    content 是 Z-Library 封面 CDN 返回的不可信字节（体积上限由调用方限定，
-    见 fetch_cover_base64）。解码前先查像素预算，并让 PIL 的
-    DecompressionBombWarning 升级为异常：按 header 声明的宽高分配内存的
-    解码方式是内存放大器，超预算即放弃。
-
-    无法解码或超预算时返回 b""（调用方按占位降级）。绝不回传原始字节：
-    原图可能是被中间人替换的任意内容，回传等于把它 base64 内嵌进发给用户的模板。
-    """
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            img = Image.open(io.BytesIO(content))
-            if img.width * img.height > _MAX_COVER_PIXELS:
-                return b""
-            if img.width > max_width:
-                ratio = max_width / img.width
-                img = img.resize(
-                    (max_width, max(1, int(img.height * ratio))), Image.LANCZOS
-                )
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=80)
-            return buf.getvalue()
-    except Exception:  # noqa: BLE001 - 解码/超预算失败一律降级为占位
-        return b""
-
-
-def _is_same_origin(target: str, base: str) -> bool:
-    """判断重定向目标是否与配置的接口地址同源。
-
-    同源口径是 scheme + 主机 + 端口完全相同（主机名大小写不敏感，
-    显式默认端口 `:443` / `:80` 与其省略写法等价）。
-    跨主机跳转会带着账号 cookies 去往未经校验的主机；跨 scheme 跳转
-    （https → http）是明文降级——两者都拒绝。
-    """
-    target_parts = urlparse(target)
-    base_parts = urlparse(base)
-    return (
-        target_parts.scheme in ("http", "https")
-        and target_parts.scheme == base_parts.scheme
-        and (target_parts.hostname or "").lower() == (base_parts.hostname or "").lower()
-        and _effective_port(target_parts) == _effective_port(base_parts)
-    )
-
-
-def _merge_set_cookies(cookies: dict, set_cookie_headers: list[str]) -> dict:
-    """把重定向响应里的 Set-Cookie 并进请求 cookies（名称 -> 值）。
-
-    只取名称与值：Domain / Path / Secure 等属性对本客户端无意义（请求只发往
-    配置的同一主机），而"带着防护 cookie 重试"才是握手放行的必要条件。
-
-    按 RFC 6265 只认整条里的**第一个** `name=value`，后面全是属性——否则
-    `a=b; Priority=High` 这种响应会把 `Priority` 也当成一个 cookie。
-    """
-    merged = dict(cookies)
-    for header in set_cookie_headers:
-        pair = header.split(";", 1)[0]
-        name, sep, value = pair.partition("=")
-        name = name.strip()
-        if not sep or not name or not _COOKIE_NAME_RE.fullmatch(name):
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] == '"':
-            value = value[1:-1]
-        if value:
-            merged[name] = value
-    return merged
-
-
-def _effective_port(parts) -> int | None:
-    """取 URL 的有效端口：显式端口优先，否则用 scheme 的默认端口。"""
-    if parts.port is not None:
-        return parts.port
-    return {"http": 80, "https": 443}.get(parts.scheme)
-
-
-def _normalize_base_url(value: str) -> str:
-    """规范化 E-API 地址；onion 默认 HTTP，普通域名默认 HTTPS。"""
-    raw = (value or "").strip().rstrip("/")
-    if not raw:
-        raise ValueError("Z-Library E-API 地址不能为空")
-    if "://" not in raw:
-        raw = ("http://" if raw.lower().endswith(".onion") else "https://") + raw
-    parsed = urlparse(raw)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise ValueError("E-API 地址必须是 http:// 或 https:// URL")
-    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
-        raise ValueError("E-API 地址只能包含协议和主机名，不能带路径、查询或片段")
-    return f"{parsed.scheme}://{parsed.netloc}"
-
-
-def _normalize_socks_proxy_url(value: str) -> str:
-    """规范化 SOCKS URL：方案名不区分大小写，h/a 语义由 rdns=True 承担。"""
-    parsed = urlparse(value)
-    scheme = parsed.scheme.lower()
-    if scheme == "socks5h":
-        scheme = "socks5"
-    elif scheme == "socks4a":
-        scheme = "socks4"
-    return parsed._replace(scheme=scheme).geturl()
+def mask_proxy(proxy: str) -> str:
+    """代理地址脱敏：去掉用户名与密码，只留协议与主机端口。"""
+    if not proxy:
+        return ""
+    parsed = urlparse(proxy)
+    host = parsed.hostname or ""
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{host}{port}"
 
 
 class ZlibClient:
-    """Z-Library E-API 异步客户端。"""
-
     def __init__(
         self,
-        accounts: list[dict],
-        domain: str = "z-library.sk",
+        accounts: list[Account],
+        *,
+        domains: list[str] | tuple[str, ...] = (),
         proxy: str = "",
-        timeout: float = 30.0,
         max_download_mb: int = 80,
+        timeout: float = 30.0,
+        cache_path: Path | None = None,
     ):
-        self.base_url = _normalize_base_url(domain)
-        self.domain = urlparse(self.base_url).hostname or ""
-        self.is_onion = self.domain.lower().endswith(".onion")
-        self.proxy = proxy or None
-        self._socks_proxy = bool(
-            self.proxy
-            and urlparse(self.proxy).scheme.lower()
-            in {"socks4", "socks4a", "socks5", "socks5h"}
-        )
-        if self.is_onion and not self._socks_proxy:
-            raise ValueError(".onion 地址必须配置 SOCKS 代理，例如 socks5://tor:9050")
+        self.accounts = accounts
+        self.proxy = proxy
+        self.max_download_bytes = max(1, int(max_download_mb)) * 1024 * 1024
         self.timeout = timeout
-        self.max_download_bytes = max(1, min(int(max_download_mb), 512)) * 1024 * 1024
-        self.pool: list[Account] = []
-        for acc in accounts:
-            if not isinstance(acc, dict):
-                continue
-            self.pool.append(
-                Account(
-                    name=str(acc.get("name", acc.get("email", "account"))),
-                    email=str(acc.get("email", "") or ""),
-                    password=str(acc.get("password", "") or ""),
-                    remix_userid=str(acc.get("remix_userid", "") or ""),
-                    remix_userkey=str(acc.get("remix_userkey", "") or ""),
-                )
-            )
-        self._session: aiohttp.ClientSession | None = None
-        self._session_lock = asyncio.Lock()
-        # 建连期捕获的对端 IP：host -> peername。aiohttp 在响应体读完后立即释放
-        # 连接（ClientResponse.connection 变 None），此后无从取对端；建连期是唯一
-        # 稳定观测点（keep-alive 复用连接不重新建连，见 _peer_for_get）
-        self._peers: dict[str, str] = {}
-        # 登录互斥锁：防止插件更新/重载导致新旧实例并发触发 login_all
+        self.transport = ZlibTransport(proxy, timeout)
+        self.domains = DomainPool(domains, allow_onion=self.transport.socks)
+        self.book_cache = BookCache(cache_path)
         self._login_lock = asyncio.Lock()
-        # 搜索结果的书籍缓存：id -> book dict（下载时按 id 取完整信息，含 hash）
-        # 持久化到磁盘，AstrBot 重启后仍可凭 id 下载
-        self.book_cache: dict[int, dict] = {}
-        self._load_book_cache()
+        self._last_login_attempt: dict[str, float] = {}
 
-    # ---------- 书籍缓存持久化 ----------
+    async def close(self) -> None:
+        self.book_cache.flush()
+        await self.transport.close()
 
-    def _cache_file(self) -> str:
-        return os.path.join(plugin_data_dir(), "book_cache.json")
+    # ---------- 底层请求 ----------
 
-    def _load_book_cache(self):
-        try:
-            path = self._cache_file()
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as f:
-                    data = json.load(f)
-                    self.book_cache = {int(k): v for k, v in data.items()}
-        except Exception:  # noqa: BLE001 - 缓存损坏不影响运行
-            self.book_cache = {}
+    @staticmethod
+    def _cookies(account: Account | None) -> dict:
+        if account is not None and account.has_remix:
+            return {
+                "remix_userid": account.remix_userid,
+                "remix_userkey": account.remix_userkey,
+            }
+        return {}
 
-    def _save_book_cache(self):
-        try:
-            path = self._cache_file()
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(
-                    {str(k): v for k, v in self.book_cache.items()},
-                    f,
-                    ensure_ascii=False,
-                )
-        except Exception as e:  # noqa: BLE001 - 缓存写入失败不影响运行
-            logger.warning(f"书籍缓存写入失败: {e}")
-
-    # ---------- 会话管理 ----------
-
-    def _install_peer_capture(self, connector) -> None:
-        """在 connector 上挂建连期对端观测。
-
-        aiohttp 的 TraceConfig 也挂在建连期，但其 `on_connection_create_end`
-        只收到 (session, trace_config_ctx, params)，params 里没有任何连接对象，
-        取不到 transport；因此只能在 connector 的建连方法上包一层。
-        """
-        if getattr(connector, "_zl_peer_capture", False):
-            return
-        inner_create = connector._create_connection
-
-        async def _create_with_peer(req, traces, timeout):
-            proto = await inner_create(req, traces, timeout)
-            try:
-                transport = getattr(proto, "transport", None)
-                peer = (
-                    transport.get_extra_info("peername")
-                    if transport is not None
-                    else None
-                )
-                if peer and peer[0]:
-                    # 按主机记录，不按连接：复用连接不重新建连，无从观测
-                    self._peers[req.url.host] = str(peer[0])
-            except Exception:  # noqa: BLE001 - 观测失败不影响建连
-                pass
-            return proto
-
-        connector._create_connection = _create_with_peer
-        connector._zl_peer_capture = True
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            async with self._session_lock:
-                if self._session is None or self._session.closed:
-                    timeout = aiohttp.ClientTimeout(total=self.timeout)
-                    connector = None
-                    if self._socks_proxy:
-                        proxy_url = _normalize_socks_proxy_url(self.proxy)
-                        connector = ProxyConnector.from_url(proxy_url, rdns=True)
-                    self._session = aiohttp.ClientSession(
-                        timeout=timeout, headers=DEFAULT_HEADERS, connector=connector
-                    )
-                    # 直连时建立建连期观测；包代理时 _guarded_get 不对端核验，
-                    # 记录下来的也只是代理地址，不参与判定
-                    if not self._socks_proxy and self._session.connector is not None:
-                        self._peers.clear()
-                        self._install_peer_capture(self._session.connector)
-        return self._session
-
-    async def close(self):
-        self._peers.clear()
-        if self._session and not self._session.closed:
-            await self._session.close()
-
-    # ---------- 基础请求 ----------
-
-    def _base_url(self) -> str:
-        return self.base_url
-
-    def _proxy_kwargs(self) -> dict:
-        """SOCKS 由 session connector 接管；HTTP(S) 代理按请求传入。"""
-        return {} if self._socks_proxy or not self.proxy else {"proxy": self.proxy}
-
-    def _cookies(self, account: Account) -> dict:
-        cookies = {"siteLanguageV2": "en"}
-        if account.remix_userid and account.remix_userkey:
-            cookies["remix_userid"] = account.remix_userid
-            cookies["remix_userkey"] = account.remix_userkey
-        return cookies
-
-    def _cover_cookies(self) -> dict | None:
-        """封面下载用的 cookies：取账号池第一个账号的登录凭证。
-
-        封面 CDN（covers.z-lib.sk 等）要求登录态，裸请求会被拒
-        （HTTP 513）；搜索能成功正是因为 E-API 请求带了账号 cookies。
-        没配置账号时返回 None（匿名请求）。
-        """
-        if not self.pool:
-            return None
-        return self._cookies(self.pool[0])
-
-    async def _request_json(
+    async def _api(
         self,
         method: str,
         path: str,
         *,
         account: Account | None = None,
         data: dict | None = None,
-        params: dict | None = None,
+        trusted_only: bool = False,
+        what: str = "请求",
     ) -> dict:
-        """发请求并解析 JSON；对常见异常做分类。
+        """经域名池发起 E-API 请求；业务失败（success 非真）抛分类后的 ZlibError。
 
-        3xx 手动逐跳跟随，但只允许跳回同一个源（scheme + 主机 + 端口）：
-        Z-Library 的前置防护（DiamWall）会先回一个自指 307 种下 cookie，
-        客户端带着 cookie 重发才放行，因此不能一律拒绝 3xx；而跨主机跳转
-        会把带账号 cookies 的请求送去未经校验的主机，必须拒绝。
+        带账号或携带凭据的请求只发往内置与用户配置的镜像（trusted_only），
+        镜像告知的域名只承接匿名请求。
         """
-        session = await self._get_session()
-        base_url = self._base_url()
-        url = base_url + path
-        # 不关 TLS 校验：这条通道承载登录 POST（email+password）与长效 remix
-        # userid/userkey——它们是账号的等价凭据。关掉校验等于把凭据交给链路上
-        # 任何中间人；aiohttp 默认（校验证书链与主机名）即为正确行为。
-        # onion 模式是明文 http，不涉及 TLS，由 SOCKS 代理承担链路。
-        kwargs: dict = {**self._proxy_kwargs()}
-        if account is not None:
-            kwargs["cookies"] = self._cookies(account)
-        if params:
-            kwargs["params"] = params
-        headers = {}
-        if data is not None:
-            # 表单 Content-Type 只在带请求体的 POST 上有意义
-            headers["Content-Type"] = "application/x-www-form-urlencoded"
-        if headers:
-            kwargs["headers"] = headers
+        cookies = self._cookies(account)
 
-        # 每次重发沿用同一份 params / headers / cookies。
-        # 重定向响应里的 Set-Cookie 必须自己收进 cookies 再重发：aiohttp 的
-        # cookie jar 本身会存也会带（client.py 的 update_cookies_from_headers），
-        # 但**只要调用方显式传了 cookies=，aiohttp 就不再合并 jar**——而本客户端
-        # 每次都显式传（账号 remix 凭据），于是 DiamWall 的"自指 307 + 种 cookie +
-        # 带 cookie 重试"握手会卡在跳数上限。必须手工把 Set-Cookie 并进该字典。
-        hop = 0
-        while True:
-            try:
-                async with session.request(
-                    method, url, data=data, allow_redirects=False, **kwargs
-                ) as resp:
-                    # 强制 UTF-8 解码：Z-Library 响应头常缺失 charset，aiohttp 会误判为 latin-1。
-                    # 先按硬上限读字节再解码，避免异常端点用无限响应体撑爆内存。
-                    raw = await resp.content.read(_MAX_API_BYTES + 1)
-                    if len(raw) > _MAX_API_BYTES:
-                        raise ZlibError(
-                            "domain_invalid",
-                            f"当前域名 {self.domain} 的响应超过 {_MAX_API_BYTES // 1024 // 1024} MiB 上限",
-                        )
-                    text = (
-                        raw.decode("utf-8", errors="replace")
-                        if isinstance(raw, bytes)
-                        else raw
-                    )
-                    status = resp.status
-                    location = (
-                        resp.headers.get("Location")
-                        if status in _REDIRECT_STATUSES
-                        else None
-                    )
-                    set_cookies = list(resp.headers.getall("Set-Cookie", []))
-            except (
-                aiohttp.ClientConnectorError,
-                aiohttp.ServerTimeoutError,
-                asyncio.TimeoutError,
-            ) as e:
-                raise ZlibError(
-                    "network_error",
-                    "网络异常（连接失败或超时）",
-                    f"{type(e).__name__}: {e}",
-                )
-            except aiohttp.ClientError as e:
-                raise ZlibError("network_error", "网络请求失败", str(e))
-
-            if status not in _REDIRECT_STATUSES:
-                break
-            if not location:
-                raise ZlibError(
-                    "domain_invalid",
-                    f"接口重定向缺少 Location（HTTP {status}）",
-                    text[:200],
-                )
-            target = urljoin(url, location)
-            if not _is_same_origin(target, base_url):
-                raise ZlibError(
-                    "domain_invalid",
-                    f"接口重定向到了配置域名之外（HTTP {status}）",
-                    target[:200],
-                )
-            if hop >= _MAX_API_REDIRECT_HOPS:
-                raise ZlibError(
-                    "domain_invalid",
-                    f"接口重定向次数过多（超过 {_MAX_API_REDIRECT_HOPS} 跳）",
-                )
-            hop += 1
-            url = target
-            if set_cookies and isinstance(kwargs.get("cookies"), dict):
-                kwargs["cookies"] = _merge_set_cookies(kwargs["cookies"], set_cookies)
-
-        # 域名失效：CF 挑战页 / 非 JSON
-        if status == 404 or status >= 500:
-            raise ZlibError(
-                "domain_invalid",
-                f"当前域名 {self.domain} 可能已失效（HTTP {status}）",
-                text[:200],
+        async def op(base_url: str) -> tuple[int, dict]:
+            return await self.transport.request_json(
+                base_url, method, path, cookies=cookies, data=data
             )
 
-        if _is_cf_challenge(text):
-            raise ZlibError(
-                "domain_invalid",
-                f"当前域名 {self.domain} 触发了人机验证，可能已失效",
-                text[:200],
-            )
-
-        if _is_rate_limited(text):
-            raise ZlibError(
-                "rate_limited",
-                "Z-Library 对当前 IP 限流了（可能因为请求频繁或代理 IP 被标记），请稍后再试或更换代理节点",
-                text[:200],
-            )
-
-        try:
-            return _fix_mojibake_recursive(json.loads(text))
-        except json.JSONDecodeError:
-            raise ZlibError(
-                "api_error",
-                "Z-Library 返回了无法解析的内容",
-                text[:200],
-            )
+        status, resp = await self.domains.call(
+            op, trusted_only=trusted_only or account is not None
+        )
+        if not _is_success(resp):
+            raise _classify_business_error(status, resp, what)
+        return resp
 
     # ---------- 账号与登录 ----------
 
-    async def _apply_login_response(self, account: Account, resp: dict):
-        """从登录/profile 响应中提取凭据与额度。"""
-        if not resp.get("success"):
-            raise ZlibError(
-                "auth_failed",
-                "账号登录失败（邮箱或密码错误）",
-                json.dumps(resp, ensure_ascii=False)[:200],
-            )
+    @staticmethod
+    def _apply_profile(account: Account, resp: dict) -> None:
         user = resp.get("user") or {}
-        account.email = user.get("email", account.email)
-        account.remix_userid = str(user.get("id", account.remix_userid))
-        account.remix_userkey = str(
-            user.get("remix_userkey", account.remix_userkey) or ""
-        )
-        account.downloads_today = int(user.get("downloads_today", 0))
-        account.downloads_limit = int(user.get("downloads_limit", 10))
+        if user.get("id") is not None:
+            account.remix_userid = str(user["id"])
+        if user.get("remix_userkey"):
+            account.remix_userkey = str(user["remix_userkey"])
+        account.email = str(user.get("email") or account.email)
+        account.downloads_today = int(user.get("downloads_today") or 0)
+        account.downloads_limit = int(user.get("downloads_limit") or 10)
+        account.is_premium = bool(user.get("isPremium"))
         account.logged_in = True
         account.last_error = ""
 
     async def login_account(self, account: Account) -> Account:
-        """登录一个账号（remix id/key 优先，email+password 后备）。"""
-        # remix 凭证优先：GET /eapi/user/profile 验证，不走 login 端点，
-        # 不受 Z-Library 对 login 端点的 IP 风控（#ipd3）影响
-        if account.remix_userid and account.remix_userkey:
-            resp = await self._request_json(
-                "GET",
-                EP_PROFILE,
-                account=account,
+        """登录一个账号：remix 凭证走 GET profile 校验，其次邮箱密码登录。"""
+        if account.has_remix:
+            resp = await self._api(
+                "GET", EP_PROFILE, account=account, what=f"账号 {account.name} 登录"
             )
-            await self._apply_login_response(account, resp)
-        elif account.email and account.password:
-            try:
-                resp = await self._request_json(
-                    "POST",
-                    EP_LOGIN,
-                    account=account,
-                    data={"email": account.email, "password": account.password},
-                )
-            except ZlibError as e:
-                if e.category == "rate_limited":
-                    raise ZlibError(
-                        "rate_limited",
-                        f"{e.message}。提示：Z-Library 对 login 端点风控较严，"
-                        f"建议在插件配置中改用 remix_userid+remix_userkey 方式登录"
-                        f"（走 GET profile 验证，几乎不受该限流影响）",
-                    )
-                raise
-            await self._apply_login_response(account, resp)
+        elif account.has_password_login:
+            resp = await self._api(
+                "POST",
+                EP_LOGIN,
+                data={"email": account.email, "password": account.password},
+                trusted_only=True,
+                what=f"账号 {account.name} 登录",
+            )
         else:
             raise ZlibError(
                 "auth_failed",
-                f"账号 {account.name} 缺少凭据：需填 email+password 或 remix_userid+remix_userkey",
+                f"账号 {account.name} 缺少凭据：需填 remix_userid+remix_userkey 或 email+password",
             )
+        self._apply_profile(account, resp)
         logger.info(
-            f"账号 {account.name} 登录成功，今日已用 {account.downloads_today}/{account.downloads_limit} 次下载"
+            f"账号 {account.name} 登录成功，今日已用 "
+            f"{account.downloads_today}/{account.downloads_limit} 次下载"
         )
         return account
 
-    async def login_all(self):
-        """登录账号池全部账号；单个失败不影响其他账号。
+    async def ensure_login(self, *, force: bool = False) -> None:
+        """确保至少尝试过登录所有未登录账号；单个失败不影响其余账号。
 
-        防重入：并发触发（如插件更新/重载时新旧实例并行 initialize）
-        时通过互斥锁保证只执行一轮；已登录成功的账号跳过。
+        带锁防并发重入，带冷却防止凭据错误时反复撞登录端点。
         """
-        if self._login_lock.locked():
-            logger.info("账号池登录已在执行中，跳过重复登录")
-            return
         async with self._login_lock:
-            for account in self.pool:
-                if account.logged_in:
+            for account in self.accounts:
+                if account.logged_in and not force:
                     continue
+                last = self._last_login_attempt.get(account.name)
+                if (
+                    not force
+                    and last is not None
+                    and time.monotonic() - last < LOGIN_RETRY_COOLDOWN
+                ):
+                    continue
+                self._last_login_attempt[account.name] = time.monotonic()
                 try:
                     await self.login_account(account)
                 except ZlibError as e:
                     account.logged_in = False
                     account.last_error = e.message
                     logger.warning(f"账号 {account.name} 登录失败: {e}")
-        if not any(a.logged_in for a in self.pool):
-            raise ZlibError(
-                "auth_failed",
-                "账号池中所有账号均登录失败，请检查插件配置",
-            )
 
-    def pick_download_account(self) -> Account:
-        """挑选用于下载的账号：今日剩余额度最多者；无额度则抛 quota_exhausted。"""
-        candidates = [a for a in self.pool if a.logged_in and a.has_quota()]
-        if not candidates:
-            used = [
-                f"{a.name}({a.downloads_today}/{a.downloads_limit})"
-                for a in self.pool
-                if a.logged_in
-            ]
-            # 额度上限来自 API（downloads_limit），免费号 10 次、Premium 更多，
-            # 文案不硬编码次数
-            limit = max(
-                (a.downloads_limit for a in self.pool if a.logged_in), default=10
-            )
-            raise ZlibError(
-                "quota_exhausted",
-                f"账号池今日下载额度已全部用完（每个账号每日 {limit} 次）",
-                "; ".join(used),
-            )
-        # 额度剩余最多者优先
-        return max(candidates, key=lambda a: a.downloads_left)
+    def _usable_accounts(self) -> list[Account]:
+        """已登录且有额度的账号，剩余额度多者优先。"""
+        usable = [a for a in self.accounts if a.logged_in and a.has_quota()]
+        return sorted(usable, key=lambda a: a.downloads_left, reverse=True)
+
+    # ---------- 域名发现 ----------
+
+    async def discover_domains(self) -> int:
+        """向接口索取镜像域名并登记到域名池；返回新增数量。失败不抛。"""
+        try:
+            resp = await self._api("GET", EP_DOMAINS, what="获取镜像域名")
+        except ZlibError as e:
+            logger.info(f"镜像域名发现失败: {e}")
+            return 0
+        names = [
+            item.get("domain")
+            for item in resp.get("domains") or []
+            if isinstance(item, dict)
+        ]
+        return self.domains.learn(names)
 
     # ---------- 搜索 ----------
 
     async def search(
         self,
-        message: str,
+        query: str,
+        *,
         limit: int = 5,
+        page: int = 1,
         language: str = "",
         extension: str = "",
-    ) -> list[dict]:
-        """按关键词搜索图书，返回书籍列表（含 id/hash 供下载）。"""
-        account = next((a for a in self.pool if a.logged_in), None)
-        if account is None:
-            # 未登录时尝试匿名搜索（部分域名允许）
-            account = Account(name="anonymous")
-        data: dict = {"message": message, "limit": limit}
+    ) -> SearchResult:
+        """按关键词搜索（匿名即可）；结果登记进书籍缓存以便按 id 下载。"""
+        query = query.strip()
+        if not query:
+            raise ZlibError("api_error", "搜索关键词不能为空")
+        language = normalize_language(language)
+        extension = normalize_extension(extension)
+        data: dict = {
+            "message": query,
+            "limit": max(1, min(int(limit), MAX_PAGE_LIMIT)),
+            "page": max(1, int(page)),
+        }
         if language:
             data["languages[]"] = language
         if extension:
             data["extensions[]"] = extension
-        resp = await self._request_json("POST", EP_SEARCH, account=account, data=data)
-        if not resp.get("success"):
-            raise ZlibError(
-                "api_error",
-                "搜索失败",
-                json.dumps(resp, ensure_ascii=False)[:200],
-            )
-        books = resp.get("books") or []
-        # 缓存书籍信息（供 download_by_id 使用），并持久化到磁盘。
-        # 必须存浅拷贝：调用方会对返回的 book dict 就地写入 base64 封面，
-        # 若缓存引用同一对象，巨型 base64 会被序列化进磁盘缓存文件。
-        for b in books:
-            try:
-                self.book_cache[int(b["id"])] = dict(b)
-            except (KeyError, TypeError, ValueError):
-                continue
-        self._trim_book_cache()
-        self._save_book_cache()
-        return books
 
-    def _trim_book_cache(self):
-        """限制缓存条目数：dict 保持插入序，超出上限时淘汰最早写入的条目。"""
-        while len(self.book_cache) > _MAX_BOOK_CACHE:
-            self.book_cache.pop(next(iter(self.book_cache)))
-
-    async def fetch_cover_base64(
-        self, url: str, max_bytes: int = 1024 * 1024
-    ) -> tuple[str, str]:
-        """下载封面图并转成 base64 data URI，供 HTML 卡片内嵌。
-
-        背景一（内嵌）：AstrBot 云端文转图服务在远程服务器渲染模板，访问不了
-        Z-Library 封面 CDN 外链（实测封面全部加载失败）；把封面以
-        base64 内嵌进 HTML 后，渲染不再依赖外网。
-        背景二（SSRF）：封面 URL 来自 API 响应（第三方内容），请求经
-        _guarded_get 做 IP 黑名单 + 重定向逐跳校验。
-        请求带账号池第一个账号的 cookies（封面 CDN 需要登录态）。
-        返回 (data URI 或 '', 错误信息)；失败原因由调用方汇总成一条日志，
-        避免每张封面失败都打一条 WARNING 刷屏。
-        """
-        if not url or not url.startswith(("http://", "https://")):
-            return "", "无效 URL"
-        content, err = await self._download_cover(url, max_bytes)
-        if not content:
-            return "", err
-        compressed = _resize_cover(content)
-        if not compressed:
-            # 解码失败或超出像素预算：返回空 URI 让模板显示占位，
-            # 既不回传原图也不产出空的 data URI（那会被当成有效图片）
-            return "", "封面解码失败或超出像素预算"
-        mime = _guess_image_mime(compressed)
-        return f"data:{mime};base64,{base64.b64encode(compressed).decode('ascii')}", ""
-
-    @staticmethod
-    def _peer_ip(resp: aiohttp.ClientResponse) -> str | None:
-        """从响应对象取对端（TCP peer）IP；取不到返回 None。
-
-        resp.connection 在响应体读完（aiohttp 随即释放连接）或响应由测试桩
-        构造时为 None，transport 也可能不支持 peername，故整段兜底。
-        """
         try:
-            connection = getattr(resp, "connection", None)
-            if connection is None:
-                return None
-            peer = connection.transport.get_extra_info("peername")
-            if not peer or not peer[0]:
-                return None
-            return str(peer[0])
-        except Exception:  # noqa: BLE001 - 取不到对端信息
-            return None
-
-    def _peer_for_get(self, resp: aiohttp.ClientResponse, url: str) -> str | None:
-        """核验用的对端 IP：优先活连接，退回建连期记录。
-
-        活连接最准确；响应已读完时连接已被释放，则用建连期按主机记录的
-        对端（连接池按主机键控，复用连接必然是同一主机此前建过的连接）。
-        """
-        peer = self._peer_ip(resp)
-        if peer:
-            return peer
-        host = urlparse(url).hostname or ""
-        return self._peers.get(host)
-
-    async def _guarded_get(
-        self,
-        url: str,
-        *,
-        headers: dict | None = None,
-        cookies: dict | None = None,
-        timeout_total: float,
-    ) -> tuple[aiohttp.ClientResponse | None, str]:
-        """带 SSRF 校验的 GET：不自动跟随重定向，逐跳校验（最多 3 跳）。
-
-        每一跳都重新校验目标为公网 http/https 地址（is_safe_public_url），
-        防止 API 返回的 URL 或重定向把请求带去内网。
-        返回 (响应, 错误信息)；成功时响应由调用方负责关闭。
-        """
-        session = await self._get_session()
-        current = url
-        for hop in range(_MAX_GUARDED_REDIRECT_HOPS + 1):
-            # getaddrinfo 是阻塞调用，放线程池避免卡事件循环
-            ok, reason = await asyncio.to_thread(
-                is_safe_public_url, current, allow_onion=self._socks_proxy
+            resp = await self._api("POST", EP_SEARCH, data=data, what="搜索")
+        except ZlibError as e:
+            if e.category != "auth_failed":
+                raise
+            # 个别镜像要求登录后才能搜索：换已登录账号重试一次
+            await self.ensure_login()
+            account = next((a for a in self.accounts if a.logged_in), None)
+            if account is None:
+                raise ZlibError(
+                    "auth_failed", "该镜像要求登录才能搜索，请先在插件配置中添加账号"
+                ) from e
+            resp = await self._api(
+                "POST", EP_SEARCH, account=account, data=data, what="搜索"
             )
-            if not ok:
-                return None, f"URL 未通过安全校验（{reason}）: {current[:200]}"
-            try:
-                resp = await session.get(
-                    current,
-                    allow_redirects=False,
-                    **self._proxy_kwargs(),
-                    # 不关 TLS 校验：明文或降级连接会让链路上的中间人可替换
-                    # 封面/书籍字节（内容会内嵌进发给用户的模板或落盘）
-                    headers=headers,
-                    cookies=cookies,
-                    timeout=aiohttp.ClientTimeout(total=timeout_total),
-                )
-            except (
-                aiohttp.ClientConnectorError,
-                aiohttp.ServerTimeoutError,
-                asyncio.TimeoutError,
-            ) as e:
-                return None, f"网络异常: {type(e).__name__}: {e}"
-            except aiohttp.ClientError as e:
-                return None, f"{type(e).__name__}: {e}"
-            # is_safe_public_url 只证明"此刻该域名解析到的 IP 都是公网"，aiohttp
-            # 随后会自行重新解析——两次解析之间的 DNS 应答可变（rebinding）。
-            # 因此再核验真实建连的对端 IP，而不是只信任解析结果。
-            #
-            # 拿不到对端时不拒绝：响应体读完（常见的单段小响应）aiohttp 就已释放
-            # 连接，ClientResponse.connection 变 None 是常态而非异常信号；此时由
-            # 上一层 URL 校验承担，判定退化为"拿到且是私网才拒绝"。
-            #
-            # 配置了代理时整段不适用：此时 TCP 对端是代理本身（通常是 127.0.0.1），
-            # 按内网拒绝会把所有正常请求误杀。代价是这一层在代理分支失效——代理
-            # 侧的域名解析与 is_safe_public_url 的本机解析可以不一致（双解析器 /
-            # rebinding），该分支只能依赖 URL 校验与代理自身。
-            if self.proxy is None:
-                peer = self._peer_for_get(resp, current)
-                if peer is not None and is_private_ip(peer):
-                    try:
-                        await resp.release()
-                    except Exception as e:  # noqa: BLE001 - 释放失败不影响拒绝判定
-                        logger.debug(f"释放未通过校验的响应失败: {e}")
-                    return None, f"实际连接的对端不是公网地址: {current[:200]}"
-            if resp.status not in _REDIRECT_STATUSES:
-                return resp, ""
-            if hop == _MAX_GUARDED_REDIRECT_HOPS:
-                await resp.release()
-                return None, f"重定向超过 {_MAX_GUARDED_REDIRECT_HOPS} 跳"
-            location = resp.headers.get("Location")
-            await resp.release()
-            if not location:
-                return None, "重定向缺少 Location"
-            current = urljoin(current, location)
-        return None, "重定向异常"  # pragma: no cover - 循环内所有路径均已返回
 
-    async def _download_cover(
-        self, url: str, max_bytes: int
-    ) -> tuple[bytes | None, str]:
-        """下载封面图片，返回 (内容, 错误信息)；失败时内容为 None。
+        books = [
+            b for b in (Book.from_api(raw) for raw in resp.get("books") or []) if b
+        ]
+        self.book_cache.put_many(books)
+        self.book_cache.flush()
+        pagination = resp.get("pagination") or {}
+        return SearchResult(
+            query=query,
+            books=books,
+            page=int(pagination.get("current") or data["page"]),
+            total_pages=max(1, int(pagination.get("total_pages") or 1)),
+            total_items=int(pagination.get("total_items") or len(books)),
+            language=language,
+            extension=extension,
+        )
 
-        请求统一带账号池第一个账号的 cookies（封面 CDN 需要登录态，
-        否则返回 HTTP 513）；没配置账号时不带。
+    # ---------- 封面 ----------
+
+    async def fetch_cover_data_uri(self, url: str, max_bytes: int = 1024 * 1024) -> str:
+        """下载封面并转 base64 data URI，失败返回空串（卡片自动用占位）。
+
+        云端渲染器无法直接访问封面 CDN 外链，需由插件端抓取并内嵌。
         """
-        headers = {"Referer": self._base_url() + "/"}  # 部分 CDN 校验 Referer
-        cover_cookies = self._cover_cookies()
-        resp, err = await self._guarded_get(
-            url, headers=headers, cookies=cover_cookies, timeout_total=8
+        if not url:
+            return ""
+        headers = {"Referer": self.domains.primary + "/"}
+        resp, err = await self.transport.guarded_get(
+            url, headers=headers, timeout_total=8
         )
         if resp is None:
-            return None, err
+            logger.debug(f"封面下载失败: {err}")
+            return ""
         try:
             async with resp:
                 if resp.status != 200:
-                    return None, f"HTTP {resp.status}"
-                # 边读边限：只多读 1 字节用于超限判定，避免异常大图整份进内存
-                content = await resp.content.read(max_bytes + 1)
-                if not content:
-                    return None, "空内容"
-                if len(content) > max_bytes:
-                    return None, f"文件过大(>{max_bytes}B)"
-                return content, ""
-        except Exception as e:  # noqa: BLE001 - 下载失败由调用方统一处理
-            return None, f"{type(e).__name__}: {e}"
-
-    async def download_by_id(self, book_id: int) -> tuple[Account, str, bytes]:
-        """按 id 下载书籍（id 必须来自之前 search 的结果缓存，缓存已持久化）。
-
-        若缓存中无该书，抛 ZlibError 提示先搜索。
-        """
-        book = self.book_cache.get(int(book_id))
-        if book is None:
-            raise ZlibError(
-                "api_error",
-                f"没有 id={book_id} 的书籍信息，请先调用 zlib_search_books 搜索",
-            )
-        return await self.download(book)
+                    return ""
+                content = await read_limited(resp, max_bytes)
+        except Exception as e:  # noqa: BLE001 - 封面是锦上添花，任何失败都降级
+            logger.debug(f"封面读取失败: {type(e).__name__}: {e}")
+            return ""
+        if not content or len(content) > max_bytes:
+            return ""
+        # 解码与缩放是 CPU 密集操作，放线程池避免卡事件循环
+        resized = await asyncio.to_thread(resize_cover, content)
+        if not resized:
+            return ""
+        mime = guess_image_mime(resized)
+        return f"data:{mime};base64,{base64.b64encode(resized).decode('ascii')}"
 
     # ---------- 下载 ----------
 
-    async def get_download_link(
-        self, account: Account, book: dict
-    ) -> tuple[str, str, str]:
-        """获取下载直链。返回 (download_url, filename, extension)。"""
-        book_id = book.get("id")
-        hash_id = book.get("hash")
-        if not book_id or not hash_id:
-            raise ZlibError(
-                "api_error", "书籍信息缺少 id/hash，无法下载", str(book)[:200]
-            )
-        resp = await self._request_json(
+    async def get_download_link(self, account: Account, book: Book) -> tuple[str, str]:
+        """获取下载直链，返回 (直链, 安全文件名)。"""
+        resp = await self._api(
             "GET",
-            EP_FILE.format(book_id=book_id, hash_id=hash_id),
+            EP_FILE.format(book_id=book.id, hash_id=book.hash),
             account=account,
+            what="获取下载链接",
         )
-        if not resp.get("success") or not resp.get("file", {}).get("downloadLink"):
+        file_info = resp.get("file") or {}
+        link = file_info.get("downloadLink")
+        if not link:
             raise ZlibError(
                 "api_error",
                 "获取下载链接失败（可能该书无可用文件）",
                 json.dumps(resp, ensure_ascii=False)[:200],
             )
-        file_info = resp["file"]
-        dl = file_info["downloadLink"]
-        # extension 是远端 JSON 字段，可能带路径分隔符（"pdf/../../evil"）；
-        # _sanitize_filename 只清洗 description 段，ext 是清洗之后才拼上的，
-        # 因此这里独立做字符白名单（只留字母数字，限长 8）
+        # extension 是远端字段，可能带路径分隔符（"pdf/../../evil"）：
+        # 独立做字符白名单（只留字母数字，限长 8）
         ext = re.sub(r"[^A-Za-z0-9]", "", str(file_info.get("extension") or ""))[:8]
-        ext = ext or "bin"
-        description = file_info.get("description", "")
+        ext = ext or re.sub(r"[^A-Za-z0-9]", "", book.extension)[:8] or "bin"
         # 描述形如 "书名-作者 (z-library.sk...)"，清理成文件名
-        filename = description.split(" (")[0].strip() or f"book_{book_id}"
-        filename = _sanitize_filename(filename)
-        if not filename.endswith("." + ext):
-            filename = f"{filename}.{ext}"
-        # 拼上 ext 后再过一遍：文件名是写盘入口，任何一段都不能带分隔符或 ..
-        filename = _sanitize_filename(filename)
-        return dl, filename, ext
+        description = str(file_info.get("description") or "")
+        name = description.split(" (")[0].strip() or f"book_{book.id}"
+        name = sanitize_filename(name)
+        if not name.endswith("." + ext):
+            name = f"{name}.{ext}"
+        # 拼上扩展名后再清洗一遍：文件名是写盘入口，任何一段都不能带分隔符或 ..
+        return str(link), sanitize_filename(name)
 
-    async def download(self, book: dict) -> tuple[Account, str, bytes]:
-        """按书籍信息下载文件。
-
-        返回 (account, filename, file_bytes)。自动挑选额度账号并扣减额度。
-        """
-        account = self.pick_download_account()
-        dl, filename, _ext = await self.get_download_link(account, book)
-
-        # 下载直链由 API 返回（第三方内容），同样经 _guarded_get 做 SSRF 校验
-        resp, err = await self._guarded_get(dl, timeout_total=self.timeout)
+    async def _fetch_file(self, link: str) -> bytes:
+        resp, err = await self.transport.guarded_get(
+            link, timeout_total=self.timeout * 4
+        )
         if resp is None:
             raise ZlibError(
                 "network_error", "下载失败（网络异常或链接未通过安全校验）", err
@@ -974,50 +373,131 @@ class ZlibClient:
             async with resp:
                 if resp.status != 200:
                     raise ZlibError(
-                        "api_error",
-                        f"下载失败（HTTP {resp.status}）",
-                        dl[:200],
+                        "api_error", f"下载失败（HTTP {resp.status}）", link[:200]
                     )
-                content = await resp.content.read(self.max_download_bytes + 1)
+                content = await read_limited(resp, self.max_download_bytes)
         except (
             aiohttp.ClientConnectorError,
             aiohttp.ServerTimeoutError,
             asyncio.TimeoutError,
         ) as e:
-            raise ZlibError("network_error", "下载网络异常", str(e))
+            raise ZlibError("network_error", "下载网络异常", str(e)) from e
         except aiohttp.ClientError as e:
-            raise ZlibError("network_error", "下载失败", str(e))
-
+            raise ZlibError("network_error", "下载失败", str(e)) from e
         if not content:
-            raise ZlibError("api_error", "下载到的文件为空", dl[:200])
+            raise ZlibError("api_error", "下载到的文件为空", link[:200])
         if len(content) > self.max_download_bytes:
             raise ZlibError(
                 "api_error",
                 f"文件超过插件允许的 {self.max_download_bytes // 1024 // 1024} MiB 上限",
-                dl[:200],
+                link[:200],
             )
-        # 扣减额度
-        account.downloads_today += 1
-        logger.info(
-            f"下载成功: {filename} ({len(content)} bytes)，账号 {account.name} 剩余 {account.downloads_left} 次"
+        return content
+
+    async def download(self, book: Book) -> tuple[Account, str, bytes]:
+        """下载一本书：依次尝试有额度的账号，登录失效或额度用尽就换下一个。
+
+        返回 (使用的账号, 文件名, 内容)。
+        """
+        await self.ensure_login()
+        if not any(a.logged_in for a in self.accounts):
+            raise ZlibError(
+                "auth_failed",
+                "没有可用的账号，下载需要登录：请在插件配置中填写 remix 凭证或邮箱密码",
+                "; ".join(f"{a.name}: {a.last_error}" for a in self.accounts)[:200],
+            )
+        last_error: ZlibError | None = None
+        tried: set[str] = set()
+        while True:
+            account = next(
+                (a for a in self._usable_accounts() if a.name not in tried), None
+            )
+            if account is None:
+                break
+            tried.add(account.name)
+            try:
+                link, filename = await self.get_download_link(account, book)
+            except ZlibError as e:
+                if e.category == "auth_failed":
+                    account.logged_in = False
+                    account.last_error = e.message
+                    last_error = e
+                    continue
+                if e.category == "quota_exhausted":
+                    account.downloads_today = account.downloads_limit
+                    last_error = e
+                    continue
+                raise
+            content = await self._fetch_file(link)
+            account.downloads_today += 1
+            await self._refresh_quota(account)
+            logger.info(
+                f"下载成功: {filename} ({len(content)} bytes)，"
+                f"账号 {account.name} 剩余 {account.downloads_left} 次"
+            )
+            return account, filename, content
+        if last_error is not None and last_error.category == "auth_failed":
+            raise last_error
+        used = "; ".join(
+            f"{a.name}({a.downloads_today}/{a.downloads_limit})"
+            for a in self.accounts
+            if a.logged_in
         )
-        return account, filename, content
+        raise ZlibError(
+            "quota_exhausted",
+            "账号池今日下载额度已全部用完，请明天再试或添加账号",
+            used,
+        )
 
-    # ---------- 状态 ----------
+    async def download_by_id(self, book_id: int) -> tuple[Account, str, bytes]:
+        book = self.book_cache.get(int(book_id))
+        if book is None:
+            raise ZlibError("api_error", f"没有 id={book_id} 的书籍信息，请先搜索")
+        return await self.download(book)
 
-    async def get_status(self) -> list[dict]:
-        """返回账号池状态（用于 zlib_get_status 工具）。"""
-        result = []
-        for account in self.pool:
-            result.append(
-                {
-                    "name": account.name,
-                    "logged_in": account.logged_in,
-                    "email": account.email,
-                    "downloads_today": account.downloads_today,
-                    "downloads_limit": account.downloads_limit,
-                    "downloads_left": account.downloads_left,
-                    "last_error": account.last_error,
-                }
+    async def _refresh_quota(self, account: Account) -> None:
+        """下载后与服务端对齐额度；失败则保留本地累计值。"""
+        try:
+            resp = await self._api("GET", EP_PROFILE, account=account, what="刷新额度")
+        except ZlibError as e:
+            logger.debug(f"额度刷新失败: {e}")
+            return
+        self._apply_profile(account, resp)
+
+    # ---------- 状态与诊断 ----------
+
+    def account_status(self) -> list[dict]:
+        return [
+            {
+                "name": a.name,
+                "logged_in": a.logged_in,
+                "premium": a.is_premium,
+                "login_mode": "remix" if a.has_remix else "password",
+                "downloads_today": a.downloads_today,
+                "downloads_limit": a.downloads_limit,
+                "downloads_left": a.downloads_left,
+                "last_error": a.last_error,
+            }
+            for a in self.accounts
+        ]
+
+    async def diagnose(self) -> Diagnosis:
+        """并发探测全部镜像域名（各发一次最小搜索），并刷新账号状态。"""
+
+        async def probe(base_url: str) -> None:
+            status, resp = await self.transport.request_json(
+                base_url,
+                "POST",
+                EP_SEARCH,
+                data={"message": "test", "limit": 1},
             )
-        return result
+            if not _is_success(resp):
+                raise _classify_business_error(status, resp, "探测")
+
+        reports = await self.domains.probe_all(probe)
+        await self.ensure_login(force=True)
+        return Diagnosis(
+            domains=reports,
+            accounts=self.account_status(),
+            proxy=mask_proxy(self.proxy),
+        )

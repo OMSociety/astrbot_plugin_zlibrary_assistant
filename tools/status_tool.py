@@ -12,27 +12,11 @@ from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 
 from ..zlib_client import ZlibClient
+from ..zlib_format import format_status
+from .common import is_admin_context
 
-# 非管理员看到的固定短语：账号池状态含账号邮箱与登录失败详情，只对管理员可见
-_ADMIN_ONLY = "账号状态仅管理员可查。"
-
-
-def _is_admin_context(context: ContextWrapper[AstrAgentContext]) -> bool:
-    """判定本次工具调用的发起者是否为 AstrBot 管理员。
-
-    AstrBot 侧的无参调用路径（如 cron/后台任务）不带 event，
-    AstrAgentContext.event 可能为 None，因此逐层取属性并兜底为 False。
-    """
-    event = getattr(getattr(context, "context", None), "event", None)
-    if event is None:
-        return False
-    is_admin = getattr(event, "is_admin", None)
-    if not callable(is_admin):
-        return False
-    try:
-        return bool(is_admin())
-    except Exception:  # noqa: BLE001 - 判定失败一律按非管理员处理
-        return False
+# 非管理员看到的固定短语：账号状态含登录失败详情，只对管理员可见
+ADMIN_ONLY_TEXT = "账号状态仅管理员可查。"
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -44,34 +28,23 @@ class ZlibGetStatusTool(FunctionTool[AstrAgentContext]):
         "当用户询问下载次数、额度、账号状态，或下载前想确认额度时调用。"
     )
     parameters: dict = Field(
-        default_factory=lambda: {
-            "type": "object",
-            "properties": {},
-        }
+        default_factory=lambda: {"type": "object", "properties": {}}
     )
     client: ZlibClient | None = None
 
     async def call(
         self, context: ContextWrapper[AstrAgentContext], **kwargs: Any
     ) -> ToolExecResult:
-        if not _is_admin_context(context):
-            return _ADMIN_ONLY
+        if not is_admin_context(context):
+            return ADMIN_ONLY_TEXT
         if self.client is None:
-            return "插件客户端未初始化，请检查插件配置"
-
-        statuses = await self.client.get_status()
-        lines = ["Z-Library 账号池状态："]
-        for s in statuses:
-            state = "✅ 正常" if s["logged_in"] else "❌ 登录失败"
-            lines.append(
-                f"- {s['name']}（{s['email'] or 'remix-key'}）{state}，"
-                f"今日下载 {s['downloads_today']}/{s['downloads_limit']} 次"
-            )
-            if s.get("last_error"):
-                lines.append(f"  最近错误：{s['last_error']}")
-        if not statuses:
-            lines.append("- 未配置任何账号，请在插件配置中添加")
+            return "插件未初始化，请检查插件配置"
+        await self.client.ensure_login()
         return CallToolResult(
-            content=[TextContent(type="text", text="\n".join(lines))],
+            content=[
+                TextContent(
+                    type="text", text=format_status(self.client.account_status())
+                )
+            ],
             isError=False,
         )

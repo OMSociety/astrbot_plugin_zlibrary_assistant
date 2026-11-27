@@ -2,11 +2,11 @@
 
 <div align="center">
 
-<h1><img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="192" alt="ZLibrary Assistant Logo"><br>Zlibrary アシスタント</h1>
+<h1><img src="https://raw.githubusercontent.com/OMSociety/astrbot_plugin_zlibrary_assistant/main/logo.png" width="192" alt="Zlibrary Assistant"><br>Zlibrary Assistant</h1>
 
-**Z-Library 書籍検索・ダウンロードアシスタント** —— 書籍検索 · ワンクリックダウンロード · アカウントプールローテーション · HTML カード結果 · クォータ管理
+**Z-Library 書籍検索・ダウンロードアシスタント** —— ミラー自動フェイルオーバー · `/zlib` コマンド · カード画像表示 · アカウントプールの割当管理
 
-[![Version](https://img.shields.io/badge/version-1.1.2-blue.svg)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant)
+[![Version](https://img.shields.io/github/v/tag/OMSociety/astrbot_plugin_zlibrary_assistant?label=version&color=blue)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/releases)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A5v4-green.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
@@ -14,359 +14,236 @@
 
 </div>
 
-> 本プロジェクトは AI によって作成されました
+> 本プロジェクトは AI によって作成されています。
 
----
-
-## 主な特徴
-
-| 特徴 | 説明 |
-|------|------|
-| **書籍検索** | キーワードで Z-Library（3300 万冊以上）を検索し、HTML カード画像（表紙/タイトル/著者/形式/サイズ）+ id 付きテキストリストを返します |
-| **ワンクリックダウンロード** | ひとこと言えばダウンロードされ、ファイルは自動で会話に送信されます。pdf / epub / mobi などの形式に対応 |
-| **アカウントプールローテーション** | 複数アカウントで 1 日あたりのダウンロードクォータを共有し、残りクォータが最も多いアカウントを自動選択。使い切った場合はわかりやすいメッセージでお断りします |
-| **2 種類の認証情報方式** | `remix_userid+remix_userkey`（login エンドポイントのリスク制御を回避）または `email+password`（remix 認証情報を自動取得） |
-| **HTML カード結果** | 検索結果は統一されたカード画像にレンダリングされ、表紙の読み込みに失敗すると自動でグラデーション代替画像にフォールバックするため、カードが空白になることはありません |
-| **エラー分類** | IP 制限 / ドメイン無効 / ログイン無効 / クォータ枯渇 / ネットワーク異常をすべて分類して処理し、わかりやすいメッセージを表示します。プラグインがクラッシュすることはありません |
-
----
-
-## 機能概要
-
-### 書籍検索
-チャットで探したい本をそのまま伝えると、LLM が自動で検索ツールを呼び出し、**HTML カード画像**（表紙/タイトル/著者/形式/サイズ）と id 付きテキストリストを返します：
-
-```
-ユーザー: マルクスの『資本論』を探して
-🤖 → zlib_search_books(query=資本論)
-    「資本論」の検索で N 件ヒット、カード画像を送信しました ✅
-```
-
-### 書籍ダウンロード
-ひとこと言えばダウンロードされ、ファイルは自動で会話に送信されます：
-
-```
-ユーザー: 1 冊目をダウンロードして
-🤖 → zlib_download_book(book_id=<検索結果の id>)
-    ダウンロード完了 ✅ PDF ファイルを送信しました。アカウントの残りクォータ: 9 回
-```
-
-### アカウントプールおよびクォータ管理
-- 複数の Z-Library アカウントを設定でき、**アカウントごとに 1 日あたりのダウンロードクォータが独立**しています（無料アカウントで約 10 回/日）
-- ダウンロード時は**今日の残りクォータが最も多い**アカウントへ自動でローテーションし、すべて使い切った場合はメッセージとともにお断りします
-- 2 種類の認証情報方式に対応：`email+password` または `remix_userid+remix_userkey`
-
-### HTML カード結果
-検索結果は統一されたカード画像（Z-Library の表紙 + メタ情報バッジ）にレンダリングされ、表紙の読み込みに失敗すると自動でグラデーション代替画像にフォールバックするため、カードが空白になることはありません。
-
-### エラー分類
-IP 制限 / ドメイン無効 / ログイン無効 / クォータ枯渇 / ネットワーク異常をすべて分類して処理し、わかりやすいメッセージへ変換します。単発のエラーでプラグインがクラッシュすることはありません。
+Zlibrary Assistant は AstrBot に Z-Library の書籍検索とダウンロードを提供します。複数のミラードメインを内蔵して自動でフェイルオーバーし、`/zlib` コマンドと LLM ツールのどちらからでも使えます。検索結果はカード画像で表示され、ダウンロードはアカウントプールが残り枠の多い順に切り替えて行います。
 
 ---
 
 ## クイックスタート
 
-### ステップ 1：インストール
+AstrBot WebUI のプラグインマーケットで「Zlibrary助手」を検索してインストールします。
 
-AstrBot WebUI → プラグインマーケット → GitHub から `astrbot_plugin_zlibrary_assistant` をインストール
+### 最小構成
 
-### ステップ 2：最小設定（検索およびダウンロードを動かす）
+1. 検索のみ：設定は不要です（サーバーからミラーに直接届かない場合は `proxy` を設定）。
+2. ダウンロードする：`accounts` にアカウントを 1 つ追加します。`remix_userid` + `remix_userkey` を推奨します。ブラウザで Z-Library にログインし、F12 → Application → Cookie から両方の値をコピーしてください。長期間有効で、リスク制御に拒否されやすいログインエンドポイントを使いません。`email` + `password` も使えます。
+3. 保存してプラグインを再読み込みし、ボットに送信します。
 
-WebUI のプラグイン設定ページで `accounts` にアカウントを 1 つ追加するだけです（remix 方式を推奨）：
+```
+/zlib search 資本論 -l zh
+/zlib download 1
+```
 
-1. プラグイン設定ページを開く → `accounts` でアカウント項目を追加
-2. **推奨方式**：`remix_userid` + `remix_userkey` を入力（ブラウザで z-library.sk にログイン後、F12 → Cookie からコピー。長期間有効で、login エンドポイントのリスク制御を受けません）
-3. または `email` + `password` を入力（ログイン後、remix 認証情報を自動取得）
-4. 複数のアカウントが必要な場合は、項目を追加していきます（アカウントプールが自動ローテーション）
-
-保存後に AstrBot を再起動すれば、会話内で直接書籍を検索・ダウンロードできます。
-
-> **ヒント**：中国大陸のサーバーでは `proxy` にプロキシ（例：`http://127.0.0.1:7897`）を指定する必要があります。海外サーバーでは空欄で構いません。安定した onion アクセスを使いたい場合は [Tor/onion 導入](#toronion-導入) を参照してください。
-
-### 依存関係のインストール
-プラグインは `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow` に依存します。AstrBot がプラグインのインストール時に自動で処理するため、追加のインストールは不要です。
+> **注意**：公式メインドメイン（`z-library.sk` など）はブラウザ検証があり、スクリプトでは通過できません。そのため内蔵ミラーを使用します。`/zlib diag` で現在到達できるミラーを確認できます。
 
 ---
 
-## Tor/onion 導入
+## コマンド
 
-プラグインはオプションで Tor 経由により Z-Library の onion E-API にアクセスでき、従来の平文ドメインおよび HTTP プロキシ設定との後方互換性は保たれます。提供する LLM ツールは従来どおり 3 つです：
+コマンドグループは `/zlib`、別名 `/zl`。サブコマンドは中国語名が正式名で、英語の別名も使えます。
 
-- `zlib_search_books`：書籍を検索
-- `zlib_download_book`：検索結果の id でダウンロード
-- `zlib_get_status`：アカウントとクォータを確認（管理者セッションのみ）
+| コマンド | 説明 |
+|----------|------|
+| `/zlib 搜索 キーワード [-l 言語] [-e 形式] [-n 件数]` | 検索。例：`/zlib 搜索 資本論 -l zh -e pdf`。別名 `search`、`s`、`搜` |
+| `/zlib 下一页` / `/zlib 上一页` | 直近の検索結果をページ送り。別名 `next`/`n`、`prev`/`p` |
+| `/zlib 下载 番号または id` | 番号は現在のセッションの直近の結果を指します。ページ内の件数を超える数字は書籍 id として扱います。別名 `download`、`dl`、`下` |
+| `/zlib 状态` | アカウントのログイン状態と本日の残り枠（管理者のみ）。別名 `status` |
+| `/zlib 诊断` | 各ミラーの到達性と遅延を調べ、アカウントのログインを確認（管理者のみ）。別名 `diag` |
+| `/zlib 帮助` | コマンドの説明。別名 `help` |
 
-ネットワークリクエストは SOCKS5 経由で Tor に入り、`.onion` の DNS 解決は Tor 側で行われます。プラグインは任意の URL を閲覧するツールを提供しないため、プロンプトインジェクションによって Bot がオープンプロキシ化されることはありません。
+言語オプションは `zh`、`en`、`chinese`、`english` などを受け付けます。検索はダウンロード枠を消費しません。`download_admin_only` をオンにすると、ダウンロードは管理者のみになります。
 
-### Docker での導入
+---
 
-1. 通常どおり `astrbot_plugin_zlibrary_assistant` をインストールします。
-2. 次の `tor` サービスを AstrBot の `docker-compose.yml` にマージします（9050 を公衆網に公開しないでください）：
+## LLM ツール
+
+| ツール | パラメータ | 説明 |
+|--------|------------|------|
+| `zlib_search_books` | `query`（必須）、`limit`、`page`、`language`、`extension` | 検索。カード画像のパスと id 付きテキスト一覧を返します |
+| `zlib_download_book` | `book_id`（必須） | 検索結果の id でダウンロード。枠を消費するため、ユーザーが明示的に求めた場合のみ呼び出します |
+| `zlib_get_status` | なし | アカウントプールの状態。管理者セッションのみ |
+
+```
+ユーザー: マルクスの『資本論』を探して。中国語の PDF で
+モデルの呼び出し: zlib_search_books(query="資本論", language="zh", extension="pdf")
+ユーザー: 1 冊目をダウンロードして
+モデルの呼び出し: zlib_download_book(book_id=<検索結果の id>)
+```
+
+書誌フィールドは、ツール結果に入る前に区切りマーカーを除去し長さを制限します。題名に紛れた指示によるプロンプトインジェクションのリスクを下げるためです。ツールがファイルパスを返したら、モデルが `send_message_to_user`（`type=file`）で送信します。
+
+---
+
+## ミラーとフェイルオーバー
+
+- 内蔵ミラー：`z-lib.by`、`z-library.website`、`z-lib.gd`、`z-lib.gl`、`article.sk`、`articles.sk`、`z-library.qa`、`zlib.bz`。
+- ミラーの E-API へのリクエストには `source: android` ヘッダーを付けます。ネットワークエラー、証明書エラー、ブラウザ検証によるブロック、Cloudflare によるブロック、レート制限でフェイルオーバーし、そのミラーはエラーの種類に応じて冷却されます。
+- `domains` のドメインが最優先、次に内蔵ミラー。ミラーから学習したドメインは最後で、アカウント認証情報を含まないリクエストにのみ使われます。
+- ミラーに届くかどうかは、利用している出口ネットワークに依存します。`/zlib 诊断` の結果で判断してください。
+
+---
+
+## 設定項目
+
+### アカウント設定
+
+| 設定 | 型 | 既定値 | 説明 |
+|------|----|--------|------|
+| `accounts` | template_list | `[]` | アカウントプール（1 項目に 1 アカウント）。remix とメール/パスワードを両方入力した場合は remix が優先されます |
+| `accounts[].name` | string | `account` | ログと状態表示に使うアカウント名 |
+| `accounts[].remix_userid` | string | `""` | remix_userid（推奨。remix_userkey とセット） |
+| `accounts[].remix_userkey` | string | `""` | remix_userkey（推奨） |
+| `accounts[].email` | string | `""` | アカウントのメール（代替。パスワードとセット） |
+| `accounts[].password` | string | `""` | アカウントのパスワード（代替） |
+
+### 接続設定
+
+| 設定 | 型 | 既定値 | 説明 |
+|------|----|--------|------|
+| `domains` | list | `[]` | 追加のミラードメイン（ホスト名のみ）。onion には SOCKS プロキシが必要です |
+| `proxy` | string | `""` | HTTP または SOCKS プロキシ（例：`http://127.0.0.1:7890`） |
+| `max_download_mb` | int | `80` | 1 ファイルのダウンロード上限（MiB、1-512） |
+
+### 検索とダウンロードの設定
+
+| 設定 | 型 | 既定値 | 説明 |
+|------|----|--------|------|
+| `search_limit` | int | `5` | 検索結果の既定件数（1-10） |
+| `card_enabled` | bool | `true` | 検索結果をカード画像で表示。オフ、またはレンダリング失敗時はテキスト一覧を返します |
+| `download_admin_only` | bool | `false` | ダウンロードを管理者のみに限定 |
+
+### クイック設定テンプレート
+
+`data/config/astrbot_plugin_zlibrary_assistant_config.json`：
+
+```json
+{
+  "accounts": [
+    {"name": "account1", "remix_userid": "", "remix_userkey": "", "email": "", "password": ""}
+  ],
+  "domains": [],
+  "proxy": "",
+  "max_download_mb": 80,
+  "search_limit": 5,
+  "card_enabled": true,
+  "download_admin_only": false
+}
+```
+
+---
+
+## Tor/onion デプロイ
+
+プラグインは Tor 経由で onion の入口にも接続できます。`.onion` ドメインには SOCKS プロキシが必須で、DNS 解決は Tor 側で行われます。任意 URL の閲覧機能はなく、プロンプトインジェクションされたボットがオープンプロキシになることを防ぎます。
+
+### Docker
+
+1. 次の `tor` サービスを AstrBot の `docker-compose.yml` にマージします（9050 番ポートは公開しないでください）。
 
 ```yaml
 services:
   tor:
     build: ./data/plugins/astrbot_plugin_zlibrary_assistant/docker/tor
     restart: unless-stopped
-    # Tor が既存のプロキシを経由して公衆網に接続する必要がある場合は、実際の種類に応じて有効化：
+    # Tor が既存のプロキシ経由で出る必要がある場合のみ有効化：
     # environment:
     #   - TOR_UPSTREAM_PROXY=http://proxy-host:port
 ```
 
-3. AstrBot と `tor` が同じ Compose ネットワークにあることを確認し、再ビルドして起動します：
-
-```bash
-docker compose up -d --build tor astrbot
-```
-
-4. AstrBot のプラグイン設定で次のように入力します：
+2. AstrBot と `tor` を同じ Compose ネットワークに置き、`docker compose up -d --build tor astrbot` を実行します。
+3. プラグインを設定します（onion アドレスが現在有効かどうかはご自身で確認してください）。
 
 ```json
 {
-  "domain": "http://loginzlib2vrak5zzpcocc3ouizykn6k5qecgj2tzlnab5wcbqhembyd.onion",
-  "proxy": "socks5://tor:9050",
-  "max_download_mb": 80,
-  "search_limit": 5,
-  "accounts": []
+  "domains": ["http://loginzlib2vrak5zzpcocc3ouizykn6k5qecgj2tzlnab5wcbqhembyd.onion"],
+  "proxy": "socks5://tor:9050"
 }
 ```
 
-通常の HTTP/SOCKS プロキシは onion ルーターではないため、Tor の代わりにはなりません。プラグインは常に `socks5://tor:9050` に接続します。Tor 自体に上流プロキシが必要な場合は、既存サービスの実際のプロトコルに応じて `TOR_UPSTREAM_PROXY=http://proxy-host:port` または `TOR_UPSTREAM_PROXY=socks5://proxy-host:port` を設定します。上流サービスの名前・アドレス・ポートは実際の構成に合わせて入力してください。
+通常の HTTP/SOCKS プロキシは onion ルーターではなく、Tor の代わりにはなりません。
 
-アカウント設定は従来のプラグインと同じです。ログインエンドポイントへの頻繁な呼び出しを避けるため、`remix_userid` + `remix_userkey` を推奨します。
+### Docker を使わない場合
 
-### Docker を使わない導入
-
-先に Tor をインストール・起動し、SOCKS ポートをローカルのみでリッスンさせてから、`proxy` に `socks5://127.0.0.1:9050` を設定します。AstrBot が Docker 内、Tor がホスト上にある場合、Docker Desktop では通常 `socks5://host.docker.internal:9050` を使用します。この場合、Tor を Docker から到達可能なインターフェースでリッスンさせ、ファイアウォールで接続元を制限してください。
+Tor をインストールして起動し、SOCKS ポートをローカルのみで待ち受けさせ、`proxy` を `socks5://127.0.0.1:9050` に設定します。AstrBot が Docker、Tor がホストにある場合、Docker Desktop では通常 `socks5://host.docker.internal:9050` を使います。その場合 Tor を Docker から到達できるインターフェースで待ち受けさせ、ファイアウォールで接続元を制限してください。
 
 ### セキュリティ上の制約
 
-- 受け付けるのは HTTP/HTTPS のみ。`.onion` は 56 文字の v3 アドレスであること。
-- `.onion` へのリクエストは SOCKS プロキシが必須。ローカルでの DNS 解決は禁止。
-- API が返すリダイレクトは毎ホップで SSRF 検証をやり直します。
-- 1 ファイルあたり既定 80 MiB まで。異常なレスポンスによるメモリ枯渇を防ぎます。
+- HTTP/HTTPS のみ。`.onion` は 56 文字の v3 アドレスで、SOCKS プロキシが必須です。
+- API とダウンロードの各リダイレクトで SSRF 検査をやり直します。
 - Tor サービスはホストのポートを公開せず、Compose 内部ネットワーク専用です。
 
-### 検証
+---
 
-```bash
-python -m pytest -q
-```
+## 構成
 
-実際の接続性は、Tor が bootstrap を完了しているか、対象の onion がオンラインか、アカウントの資格情報が有効かにも依存します。
+| モジュール | 役割 |
+|------------|------|
+| `zlib_transport.py` | aiohttp トランスポート：ヘッダー、同一オリジンの手動リダイレクトと Cookie 統合、応答分類、上限付き読み取り、保護されたダウンロード GET（SSRF と接続先検証） |
+| `zlib_domains.py` | ミラープール：ユーザー/内蔵/学習の 3 階層、冷却、フェイルオーバー、一括プローブ |
+| `zlib_client.py` | E-API クライアント：アカウントプールのログイン、検索、ダウンロードリンク、表紙取得、状態と診断 |
+| `zlib_service.py` | コマンドとツールが共有する業務層：検索、カード、番号の解決、ダウンロードの保存 |
+| `zlib_cards.py` | カードの HTML テンプレートと描画データ（全書誌フィールドを明示的にエスケープ） |
+| `zlib_store.py` | 書誌キャッシュ（永続化）とセッションごとの検索記憶 |
+| `zlib_format.py` | コマンド引数の解析とテキスト整形 |
+| `tools/` | 3 つの LLM ツール |
+
+ダウンロードしたファイルは `<data>/plugin_data/zlibrary_assistant/books/` に保存され、7 日間保持されます。
 
 ---
 
-## 設定項目の説明
+## FAQ
 
-### アカウント設定
+### Q1：すべてのミラーが使えない、または「DiamWall 検証でブロック」と表示される
 
-| 設定項目 | 型 | デフォルト | 説明 |
-|--------|------|------|------|
-| `accounts` | template_list | `[]` | Z-Library アカウントプール。1 項目 = 1 アカウント。`remix_userid`+`remix_userkey`（ペア）または `email`+`password` を推奨 |
-| `accounts[].name` | string | `account` | アカウントのメモ名（ログでの識別に使用） |
-| `accounts[].email` | string | `""` | アカウントのメールアドレス（password とペア） |
-| `accounts[].password` | string | `""` | アカウントのパスワード |
-| `accounts[].remix_userid` | string | `""` | remix_userid（remix_userkey とペア、推奨） |
-| `accounts[].remix_userkey` | string | `""` | remix_userkey（推奨） |
+まず `/zlib 诊断` を実行してください。公式メインドメインはブラウザ検証があり、スクリプトでは通過できません。ミラーに届くかは出口 IP に依存し、プロキシノードの切り替えが効くことが多いです。ご自身で動作を確認したミラーを `domains` に追加することもできます。
 
-### 接続設定
+### Q2：「レート制限」と表示される
 
-| 設定項目 | 型 | デフォルト | 説明 |
-|--------|------|------|------|
-| `domain` | string | `z-library.sk` | Z-Library E-API のドメインまたは完全なベース URL。通常のドメインでは既定で HTTPS を使用。`http://...onion` も指定可能 |
-| `proxy` | string | `""` | HTTP または SOCKS プロキシ（任意）。onion アドレスには必ず Tor SOCKS を使用（例：`socks5://tor:9050`） |
-| `max_download_mb` | int | `80` | 1 回のダウンロードで取得できるファイルの最大サイズ（MiB、範囲 1-512） |
+サイト側がアクセス頻度や共有の出口 IP にリスク制御をかけています。プロキシノードを変えるか、頻度を下げてください。該当ミラーは自動で冷却され、その間は他のミラーが使われます。
 
-### 検索設定
+### Q3：ダウンロードで「枠を使い切った」「アカウント未設定」と表示される
 
-| 設定項目 | 型 | デフォルト | 説明 |
-|--------|------|------|------|
-| `search_limit` | int | `5` | 検索の既定の最大返却件数（LLM が指定しない場合に使用、範囲 1-8） |
+無料アカウントの 1 日のダウンロード回数には上限があります（アカウント状態を参照）。翌日のリセットを待つか、`accounts` にアカウントを追加してください。
 
-### クイック設定テンプレート
+### Q4：メール/パスワードでログインできない
 
-WebUI の設定パネルで入力するか、以下の構造を参考にしてください（`data/config/astrbot_plugin_zlibrary_assistant_config.json`）：
+ログインエンドポイントだけがリスク制御で拒否されることがよくあります。`remix_userid` + `remix_userkey` を使ってください（[最小構成](#最小構成)を参照）。
+
+### Q5：結果画像の中国語が四角（豆腐）になる
+
+AstrBot のテキスト画像化はクラウドレンダリングを優先し、失敗するとローカルレンダリングに切り替わります。ローカルレンダリングにはシステムの CJK フォントが必要ですが、公式イメージには含まれていません。次のいずれかで解決します。
+
+1. Dockerfile に追加：`RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk`
+2. 実行中のコンテナ：`docker exec -it <コンテナ名> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"`
+3. 任意の CJK フォントを `data/font.ttf` としてコピー：`docker cp msyh.ttc <コンテナ名>:/AstrBot/data/font.ttf`
+
+### Q6：LLM がダウンロードを終えてもファイルを送れない（"Sandbox runtime is disabled by configuration"）
+
+`send_message_to_user` によるローカルファイルの送信は AstrBot の `computer_use_runtime` に依存し、既定は `none` です。WebUI の 設定 → プロバイダー設定 で `computer_use_runtime` を `local` に変更し（必要なら `computer_use_require_admin` を `false` に）、または `data/config/astrbot_config.json` に次を書き込みます。
 
 ```json
-{
-  "accounts": [
-    {
-      "name": "account",
-      "email": "",
-      "password": "",
-      "remix_userid": "",
-      "remix_userkey": ""
-    }
-  ],
-  "domain": "z-library.sk",
-  "proxy": "",
-  "max_download_mb": 80,
-  "search_limit": 5
-}
+{"provider_settings": {"computer_use_runtime": "local", "computer_use_require_admin": false}}
 ```
 
----
+保存後に AstrBot を再起動してください。`/zlib 下载` コマンドはファイルを直接送信するため影響を受けません。
 
-## LLM 呼び出し可能ツール
+### Q7：Docker で検索が遅い、表紙がすべてプレースホルダーになる
 
-プラグインは 3 つの LLM ツールを登録しており、モデルが呼び出しタイミングを自動判断します。ユーザーは自然な言葉で要望を伝えるだけです：
+コンテナは独立したネットワークで、`http://127.0.0.1:ポート` はコンテナ自身を指します。`proxy` にはコンテナから到達できるアドレスを設定してください。Docker Desktop なら `http://host.docker.internal:ポート`、Linux ならホストの LAN IP を使い、プロキシソフトで LAN 接続を許可します。認証が必要なら `http://ユーザー名:パスワード@IP:ポート` と書きます。クラウドのテキスト画像化に届かない場合、レンダリングには 25 秒のタイムアウトがありテキスト一覧に切り替わります。それでも時間が足りなければ `agent_runner.config.misc.tool_call_timeout` を大きくしてください。
 
-```
-ユーザー: マルクスの『資本論』を探して
-🤖 → zlib_search_books(query=資本論)
-    「資本論」の検索で N 件ヒット、カード画像を送信しました ✅
+## 変更履歴
 
-ユーザー: 1 冊目をダウンロードして
-🤖 → zlib_download_book(book_id=123456)
-    ダウンロード完了 ✅ PDF ファイルを送信しました。アカウントの残りクォータ: 9 回
+> **[変更履歴の全文を見る →](CHANGELOG.md)**
 
-ユーザー: 今日あと何冊ダウンロードできますか？
-🤖 → zlib_get_status()
-    Z-Library アカウントプール状態: account1 ✅ 正常、今日のダウンロード 1/10 回
-```
+## サポートと謝辞
 
-### zlib_search_books
-キーワードで Z-Library の書籍ライブラリを検索し、カード画像 + id 付きテキストリストを返します。検索はダウンロードクォータを**消費しません**。
+このプラグインが役に立ったら Star をお願いします。質問や提案は [Issue](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues) または [Pull Request](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/pulls) でお寄せください。
 
-| パラメータ | 型 | 説明 |
-|------|------|------|
-| `query` | string | **必須**。検索キーワード（書名/著者/テーマ、中国語・英語に対応） |
-| `limit` | int? | 最大返却件数（未指定の場合は設定の `search_limit` を使用、最大 8） |
-| `language` | string? | 言語フィルタ（例：`zh` / `en` / `fr`） |
-| `extension` | string? | 形式フィルタ（例：`pdf` / `epub` / `mobi`） |
-
-### zlib_download_book
-検索結果の id で書籍をダウンロードしてローカルに保存します。**ユーザーが明示的にダウンロードを求めた場合のみ呼び出し**、アカウントの 1 日あたりクォータを消費します。
-
-| パラメータ | 型 | 説明 |
-|------|------|------|
-| `book_id` | int | **必須**。書籍の id（zlib_search_books が返す番号付きリストの番号） |
-
-### zlib_get_status
-アカウントプール内の各アカウントのログイン状態と今日の残りダウンロードクォータを照会します。**管理者セッションのみ**（結果にアカウントプールの内部情報が含まれるため）。
-
-| パラメータ | 型 | 説明 |
-|------|------|------|
-| （引数なし） | - | - |
-
----
-
-## アーキテクチャ
-
-### eapi クライアント（zlib_client.py）
-Z-Library Android クライアントの内部インターフェース（非公式 E-API）の非同期ラッパー：
-- aiohttp ベースで、AstrBot の開発規約に準拠（非同期、requests 禁止）
-- アカウントプール：アカウントごとに独立したクォータ状態を保持し、ダウンロード時は残りクォータが最も多いアカウントを自動選択
-- エラー分類：`rate_limited` / `auth_failed` / `quota_exhausted` / `domain_invalid` / `network_error` / `api_error`
-- 書籍キャッシュはディスクに永続化され、AstrBot 再起動後も id だけで直接ダウンロード可能
-- mojibake 修正：Z-Library が返す二重エンコードされたテキストを自動復元
-- ドメインの自動正規化（スキーム未指定の場合は通常ドメインに `https://` を、onion には `http://` を補完し、パス付きのアドレスは拒否します）。ダウンロードファイル名は、Windows のファイル名に使えない文字を自動的に除去します
-
-### ツール層（tools/）
-3 つの `FunctionTool` が `add_llm_tools` で登録され、LLM が会話の中で自動認識して呼び出します：
-- `search_tool.py` — 検索 + HTML カードレンダリング（レンダリング失敗時は自動でプレーンテキストにフォールバック）
-- `download_tool.py` — id で `<data>/plugin_data/zlibrary_assistant/books/` へダウンロードし、絶対パスを返す
-- `status_tool.py` — アカウントプールの状態照会
-
-### カードレンダリング（templates.py）
-HTML + Jinja2 テンプレートで、AstrBot 内蔵のテキスト画像化（`html_renderer`）を使用：
-- CSS フォントスタックにより、クラウドレンダリングで中国語フォントを自動選択し、ローカルフォントに依存しません
-- 表紙はプラグイン側でダウンロードして **base64 埋め込み**（クラウドレンダラーが Z-Library 外部リンクにアクセスする必要なし）。ダウンロード失敗時は自動でグラデーション代替画像を表示
-- タイトルは 2 行で切り詰め、著者は 1 行で省略。長いリストでもレイアウトが安定します
-
----
-
-## よくある質問
-
-### Q1：Docker デプロイ時に検索結果画像の中国語が豆腐（□）/文字化けになる？
-
-**原因**：AstrBot の「テキスト画像化」には 2 つの経路があります。クラウドレンダリング（既定、フォントはクラウド側にあり、ローカルフォント不要）とローカルレンダリング（クラウド失敗時の自動フォールバック、Pillow でレンダリング）です。ローカルレンダリングにはシステムの中国語フォントが必要ですが、AstrBot 公式イメージ（`python:3.12-slim`）には**中国語フォントが一切プリインストールされておらず**、Pillow がフォントを見つけられないと内蔵ビットマップフォントを使うため、中国語がすべて豆腐になります。
-
-**解決策**（いずれか 1 つ）：
-1. Dockerfile に 1 行追加（推奨、イメージ再ビルドで有効化）：
-   ```dockerfile
-   RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk
-   ```
-2. 起動中のコンテナに直接インストール：
-   ```bash
-   docker exec -it <コンテナ名> bash -c "apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk"
-   ```
-3. パッケージをインストールせず、任意の中国語フォントファイル（例：Microsoft YaHei の `msyh.ttc`）を AstrBot の `data/` ディレクトリに `font.ttf` という名前で置く：
-   ```bash
-   docker cp msyh.ttc <コンテナ名>:/AstrBot/data/font.ttf
-   ```
-
-### Q2：「Z-Library が現在の IP を制限しています」と表示される？
-
-Z-Library はアクセス頻度に厳しいリスク制御（エラーコード `#ipd3`）を敷いており、共有プロキシ IP（いわゆる「空港」ノードなど）はマークされやすいです。解決策：
-- プロキシノードを変更する（Clash/V2Ray でノードを切り替え）
-- または短時間のリクエスト頻度を下げる
-- プラグインはこのエラーを分類してわかりやすいメッセージを表示し、クラッシュせず、クールダウン後に自動復旧します
-
-### Q3：「現在のドメインは無効の可能性があります」と表示される？
-
-Z-Library のドメインは差押え/変更が頻繁です（実測では常用ドメインの約半分が無効）。解決策：プラグイン設定の `domain` を現在有効なドメイン（例：`z-library.sk`、**`https://` 接頭辞は不要**）に変更します。有効性は事前に `https://<ドメイン>/eapi/info` にアクセスして確認できます（JSON が返れば有効）。
-
-### Q4：ダウンロード時に「アカウントプールのクォータを使い切りました」と表示される？
-
-Z-Library の無料アカウントには 1 日あたりのダウンロード回数制限（約 10 回/日）があります。解決策：
-- 翌日のクォータリセットを待つ
-- `accounts` 設定にアカウントを追加する（アカウントプールが残りクォータ最大のアカウントへ自動ローテーション）
-
-### Q5：ログインが「IP 制限」（#ipd3）ばかり表示するのに、ウェブサイトは開ける？
-
-**原因**：Z-Library は **login エンドポイント**に独立したリスク制御（読み取り専用エンドポイントより厳しい）を設けており、「空港」の共有 IP はマークされやすいです。`/eapi/info` などの読み取り専用インターフェースはアクセスできるままですが、`email+password` ログインは拒否されます。
-
-**解決策**：**`remix_userid` + `remix_userkey`** 方式に切り替えます（login エンドポイントを通らず、GET 検証のみのため、このリスク制御をほとんど受けません）：
-1. Z-Library に一度でも正常にログインした後、個人ページ/クライアントでこの 2 つの値を取得
-2. プラグイン設定の `accounts` に `remix_userid` および `remix_userkey` を入力（email/password は空欄）
-3. プラグインが GET `/eapi/user/profile` で検証し、検索/ダウンロードが通常どおり使えます
-
-> **ヒント**：`remix_userkey` は長期間有効で、一度設定すれば継続して使えます。
-
-### Q6：ダウンロードは完了したのにファイルが送信されず、"Sandbox runtime is disabled by configuration" と表示される？
-
-**原因**：AstrBot の `send_message_to_user` によるローカルファイル送信は **Computer Use ローカルランタイム**（`computer_use_runtime`）に依存しますが、AstrBot の既定値は `none` のため、ローカルファイルがサンドボックスにブロックされます。
-
-**解決策**（WebUI または設定ファイルのどちらか）：
-1. **WebUI**：`設定（Config）→ サービスプロバイダー設定 → computer_use_runtime` を `local` に変更（`computer_use_require_admin` を `false` にしても可）
-2. **設定ファイル**：`data/config/astrbot_config.json` を編集（存在しなければ作成）：
-   ```json
-   {
-     "provider_settings": {
-       "computer_use_runtime": "local",
-       "computer_use_require_admin": false
-     }
-   }
-   ```
-   保存後に AstrBot を再起動します。
-
-### Q7：どの依存関係を設定すればよい？
-
-プラグインは `aiohttp` + `aiofiles` + `aiohttp-socks` + `Pillow` に依存し、AstrBot がプラグインのインストール時に自動処理します。テキスト画像化は AstrBot 内蔵機能を使用するため、追加インストールは不要です。
-
-### Q8：Docker デプロイ時に検索が遅い / カードの表紙がすべて代替画像 / ツールが timeout を報告する？
-
-**原因**：Docker コンテナは独立したネットワーク環境のため、設定の `http://127.0.0.1:7897` は**コンテナ自身**（あなたのプロキシは中にない）を指し、表紙ダウンロードがすべて失敗（代替画像を表示）します。さらに、クラウドのテキスト画像化にコンテナ内から接続できない場合、レンダリングがツール全体のタイムアウト（AstrBot 既定の `tool_call_timeout` 120 秒）を使い切ります。
-
-**解決策**：
-1. **コンテナから到達できるプロキシアドレスを指定**：形式は `http://IP:ポート`。プロキシに認証が必要な場合は `http://ユーザー名:パスワード@IP:ポート`（例：`http://user:pass@IP:port`）。プラグインは aiohttp ベースで、`Proxy-Authorization` 認証ヘッダーを自動送信します。Windows/Mac の Docker Desktop では `http://host.docker.internal:ポート` を使用でき、Linux ではホストの LAN IP を使い、プロキシソフトで「LAN 接続を許可」を有効にしてください
-2. クラウドのテキスト画像化に届かない場合：プラグインには**25 秒のレンダリングタイムアウト保護**が組み込まれており、レンダリング失敗時は自動でプレーンテキストの書籍リストにフォールバックします（ツール全体はエラーになりません）。許容できるなら対処不要です
-3. それでも時間が足りない場合：AstrBot 設定の `agent_runner.config.misc.tool_call_timeout` を大きくします（例：`240`）
-
-## 更新履歴
-
-> **[更新履歴の全文を見る →](CHANGELOG.md)**
-
-## 応援と謝辞
-
-このプラグインが役に立ったら、Star をぜひお願いします。問題や提案があれば [Issue](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues) または [Pull Request](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/pulls) をお寄せください。
-
-- [AstrBot](https://github.com/AstrBotDevs/AstrBot) オープンソースチャットボットフレームワーク
+- [AstrBot](https://github.com/AstrBotDevs/AstrBot) オープンソースのチャットボットフレームワーク
 
 ## ライセンスと作者
 
-本プロジェクトは **MIT License** で公開しています。
+本プロジェクトは **MIT License** で公開されています。
 
 [@OMSociety](https://github.com/OMSociety)

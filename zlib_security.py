@@ -3,7 +3,7 @@
 Z-Library 的封面 CDN 地址与下载直链均来自 API 响应（第三方内容），
 请求前必须校验为公网 http/https 地址，或显式启用的 v3 onion 地址：内网 / 环回 / 链路本地 / 云元数据 /
 保留 / 多播 IP 全部拒绝；域名做 DNS 解析二次校验（防 rebinding）；
-重定向不自动跟随，由调用方逐跳校验（见 zlib_client._guarded_get）。
+重定向不自动跟随，由调用方逐跳校验（见 ZlibTransport.guarded_get）。
 
 本模块只做 URL 校验：插件无本地文件读取路径，不需要 security.py 的
 本地路径白名单部分。

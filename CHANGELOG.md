@@ -10,6 +10,48 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 新增
+
+- **`/zlib` 指令组**（别名 `/zl`）：`搜索`（支持 `-l` 语言、`-e` 格式、`-n` 条数）、`下一页`、`上一页`、`下载`（按序号或书籍 id）、`状态`、`诊断`、`帮助`；序号取自当前会话最近一次搜索结果。
+- **镜像域名池与自动故障转移**：内置一组可直连镜像，按延迟排序；网络错误、证书错误、浏览器验证拦截、Cloudflare 拦截、限流都会触发换镜像，并按错误类型冷却。可从镜像的 `/eapi/info/domains` 学习新域名（至多 8 个，仅承接匿名请求，带账号凭证的请求只发往内置与用户配置的镜像）。
+- **`/zlib 诊断`**：探测每个镜像的可达性与延迟，并检查账号登录。
+- **配置项**：`domains`（额外镜像）、`card_enabled`（卡片图片开关）、`download_admin_only`（下载仅管理员）。
+- **`zlib_search_books` 新增 `page` 参数**，搜索结果按会话记忆，支持翻页与按序号下载。
+- 响应分类新增 `diamwall_blocked`、`cloudflare_blocked`、`tls_error`、`all_domains_failed`，错误提示给出对应处理方向。
+
+### 变更
+
+- **请求固定携带 `source: android` 头**，使镜像的 E-API 接受搜索请求。
+- **搜索无需账号**；下载才需要账号。登录改为惰性触发（带锁与冷却），插件加载时后台预热一次。
+- **账号凭证以 remix 为主**；下载按剩余额度循环账号，登录失效或额度耗尽自动换号，下载后刷新额度。
+- **搜索结果卡片重新设计**：封面加大、序号徽章、按格式配色的标签、页脚操作提示；JPEG 质量由默认的 40 提升到 90。所有书目字段在模板中显式转义（渲染端不启用 Jinja2 autoescape）。
+
+### 移除
+
+- 配置项 `domain` 由 `domains` 取代；官方主域（如 `z-library.sk`）启用浏览器验证，脚本无法直连，不再作为默认入口。升级后请重新核对配置。
+
+### Added
+
+- **`/zlib` command group** (alias `/zl`): `search` (with `-l` language, `-e` extension, `-n` count), `next`, `prev`, `download` (by index or book id), `status`, `diag`, `help`; indexes refer to the latest search results of the current session.
+- **Mirror pool with automatic failover**: a built-in set of directly reachable mirrors ranked by latency; network errors, certificate errors, browser-verification blocks, Cloudflare blocks and rate limiting all trigger a switch and a per-error-type cooldown. New domains can be learned from a mirror's `/eapi/info/domains` (at most 8, anonymous requests only; requests carrying account credentials go only to built-in and user-configured mirrors).
+- **`/zlib diag`**: probes every mirror for reachability and latency and checks account logins.
+- **Options**: `domains` (extra mirrors), `card_enabled` (card image switch), `download_admin_only` (admin-only downloads).
+- **`zlib_search_books` gains a `page` parameter**; search results are remembered per session for paging and index-based downloads.
+- New response categories `diamwall_blocked`, `cloudflare_blocked`, `tls_error`, `all_domains_failed`, each with an actionable message.
+
+### Changed
+
+- **Requests always carry the `source: android` header**, which the mirrors' E-API requires for search.
+- **Searching needs no account**; only downloading does. Login is lazy (locked, with a cooldown) and warmed up once in the background when the plugin loads.
+- **Account credentials prefer remix**; downloads loop over accounts by remaining quota, switching on login failure or exhausted quota, and refresh the quota afterwards.
+- **Search result card redesigned**: larger covers, index badges, format-colored tags and a footer hint; JPEG quality raised from the default 40 to 90. Every book field is explicitly escaped in the template (the renderer does not enable Jinja2 autoescape).
+
+### Removed
+
+- The `domain` option is replaced by `domains`; the official main domains (e.g. `z-library.sk`) require browser verification and cannot be reached by scripts, so they are no longer the default entry. Re-check your configuration after upgrading.
+
 ## [1.1.2] - 2026-11-16
 
 ### 修复
