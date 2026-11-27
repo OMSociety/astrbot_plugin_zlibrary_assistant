@@ -30,8 +30,9 @@ from .zlib_store import SearchMemory
 # 渲染函数：(模板, 数据, 渲染选项, umo) -> 本地图片路径
 Renderer = Callable[[str, dict, dict, str], Awaitable[str]]
 
-# 渲染服务不可达时不能无限等：AstrBot 对工具调用整体有 120 秒超时
-CARD_RENDER_TIMEOUT = 25.0
+# 渲染是一次网络调用（实测云端 t2i 单张约 8-9 秒），超时按纯文本回退。
+# 这一预算要连同搜索一起塞进工具调用的整体时限，故不设得太宽。
+CARD_RENDER_TIMEOUT = 15.0
 COVER_CONCURRENCY = 8
 
 # 下载目录保留期：书籍文件只增不减会把磁盘吃满，超期文件在每次成功下载后清理

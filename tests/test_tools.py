@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import types
 
 import pytest
@@ -17,6 +18,7 @@ from stubs import (
     profile,
 )
 
+from astrbot_plugin_zlibrary_assistant.tools import search_tool, status_tool
 from astrbot_plugin_zlibrary_assistant.tools.common import is_admin_context, session_key
 from astrbot_plugin_zlibrary_assistant.tools.download_tool import ZlibDownloadBookTool
 from astrbot_plugin_zlibrary_assistant.tools.search_tool import ZlibSearchBooksTool
@@ -157,6 +159,21 @@ class TestStatusTool:
         assert "正常" in text
         assert "SECRETKEY" not in text
 
+    @pytest.mark.asyncio
+    async def test_login_timeout_still_reports_cached_status(self, monkeypatch):
+        client, _ = self._client(
+            monkeypatch, make_account("r", remix_userid="1", remix_userkey="k")
+        )
+
+        async def hang() -> None:
+            await asyncio.sleep(5)
+
+        monkeypatch.setattr(client, "ensure_login", hang)
+        monkeypatch.setattr(status_tool, "TOOL_DEADLINE", 0.01)
+        text = text_of(await ZlibGetStatusTool(client=client).call(ctx(admin=True)))
+        assert text.startswith("登录检查超时")
+        assert "r（remix）" in text
+
 
 # ---------- 搜索工具 ----------
 
@@ -195,6 +212,17 @@ class TestSearchTool:
         svc = ZlibService(FakeClient([]), data_dir=tmp_path, renderer=None)
         text = await ZlibSearchBooksTool(service=svc).call(ctx(), query="冷门书")
         assert text == "未在 Z-Library 找到与「冷门书」相关的图书，可以换个关键词试试。"
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_fixed_phrase(self, service, monkeypatch):
+        async def hang(*a, **k):
+            await asyncio.sleep(5)
+
+        service.client.search = hang
+        monkeypatch.setattr(search_tool, "TOOL_DEADLINE", 0.01)
+        text = await self._tool(service).call(ctx(), query="x")
+        assert text.startswith("搜索超时")
+        assert "不要凭猜测回答用户" in text
 
     @pytest.mark.asyncio
     async def test_arguments_forwarded_and_session_isolated(self, service):

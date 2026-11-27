@@ -7,6 +7,10 @@ from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
 from astrbot.core.message.message_event_result import MessageChain
 
+# 单次工具调用的时限（秒）。镜像不稳时故障转移要逐个试域名，放任它跑
+# 会把整轮对话拖住几分钟，超时就先回一句「镜像不稳」让用户重试。
+TOOL_DEADLINE = 20.0
+
 
 def _event(context: ContextWrapper[AstrAgentContext]):
     """取本次调用的消息事件；AstrBot 的后台/定时调用路径不带 event，返回 None。"""

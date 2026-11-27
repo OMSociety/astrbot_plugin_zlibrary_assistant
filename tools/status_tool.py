@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from astrbot.core.agent.run_context import ContextWrapper
@@ -13,10 +14,13 @@ from pydantic.dataclasses import dataclass
 
 from ..zlib_client import ZlibClient
 from ..zlib_format import format_status
-from .common import is_admin_context
+from .common import TOOL_DEADLINE, is_admin_context
 
 # 非管理员看到的固定短语：账号状态含登录失败详情，只对管理员可见
 ADMIN_ONLY_TEXT = "账号状态仅管理员可查。"
+
+# 登录检查超时时的说明：状态照旧给出，但要说清可能不是最新的
+STALE_NOTE = "登录检查超时（镜像不稳），以下为本地记录的状态。\n"
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -39,11 +43,15 @@ class ZlibGetStatusTool(FunctionTool[AstrAgentContext]):
             return ADMIN_ONLY_TEXT
         if self.client is None:
             return "插件未初始化，请检查插件配置"
-        await self.client.ensure_login()
+        note = ""
+        try:
+            await asyncio.wait_for(self.client.ensure_login(), TOOL_DEADLINE)
+        except asyncio.TimeoutError:
+            note = STALE_NOTE
         return CallToolResult(
             content=[
                 TextContent(
-                    type="text", text=format_status(self.client.account_status())
+                    type="text", text=note + format_status(self.client.account_status())
                 )
             ],
             isError=False,

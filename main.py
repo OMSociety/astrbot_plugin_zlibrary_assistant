@@ -17,6 +17,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 from astrbot.core.message.components import File, Image
 
+from .tools.common import TOOL_DEADLINE
 from .tools.download_tool import ZlibDownloadBookTool
 from .tools.search_tool import ZlibSearchBooksTool
 from .tools.status_tool import ZlibGetStatusTool
@@ -218,7 +219,13 @@ class ZLibraryAssistantPlugin(Star):
 
     async def _search_reply(self, event: AstrMessageEvent, pending):
         try:
-            outcome = await pending
+            outcome = await asyncio.wait_for(pending, TOOL_DEADLINE)
+        except asyncio.TimeoutError:
+            yield event.plain_result(
+                f"搜索超时：镜像在 {TOOL_DEADLINE:.0f} 秒内没有返回结果，"
+                "稍后重试或换个关键词。"
+            )
+            return
         except ZlibError as e:
             yield event.plain_result(f"{e.message}")
             return
@@ -286,8 +293,12 @@ class ZLibraryAssistantPlugin(Star):
         if not event.is_admin():
             yield event.plain_result("账号状态仅管理员可查。")
             return
-        await self.client.ensure_login()
-        yield event.plain_result(format_status(self.client.account_status()))
+        note = ""
+        try:
+            await asyncio.wait_for(self.client.ensure_login(), TOOL_DEADLINE)
+        except asyncio.TimeoutError:
+            note = "登录检查超时（镜像不稳），以下为本地记录的状态。\n"
+        yield event.plain_result(note + format_status(self.client.account_status()))
 
     @zlib.command("诊断", alias=_SUB_DIAG)
     async def cmd_diagnose(self, event: AstrMessageEvent):

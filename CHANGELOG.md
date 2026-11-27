@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **账号凭证以 remix 为主**；下载按剩余额度循环账号，登录失效或额度耗尽自动换号，下载后刷新额度。
 - **搜索结果卡片重新设计**：构成主义配色（黑、红、米白），黑色抬头配关键词与页码、序号红黑交替的条列、按格式配色的标签、页脚操作提示；JPEG 质量由默认的 40 提升到 90。所有书目字段在模板中显式转义（渲染端不启用 Jinja2 autoescape）。
 - **工具交付内聚**：结果卡片与下载好的文件由插件直接发送，模型不再需要转述本地路径，也不依赖 `send_message_to_user` 的文件白名单与 `computer_use_runtime` 设置。
+- **搜索、翻页与额度查询限时 20 秒**：镜像不稳时逐个试域名会把一轮对话拖上几分钟，超时即回一句提示让人重试；卡片渲染单独限时 15 秒，超时按纯文本回退。
 - **搜索结果带简介进入模型上下文**：工具结果的书目行后附清洗过的简介（去 HTML、压行、限长），模型据此判断版本，不必反复搜索；下载进度改为流式写盘，完成后一次性汇报耗时与剩余额度。
 
 ### 移除
@@ -52,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Account credentials prefer remix**; downloads loop over accounts by remaining quota, switching on login failure or exhausted quota, and refresh the quota afterwards.
 - **Search result card redesigned**: constructivist palette (black, red, cream), a black header carrying the query and page count, alternating red and black index columns, format-colored tags and a footer hint; JPEG quality raised from the default 40 to 90. Every book field is explicitly escaped in the template (the renderer does not enable Jinja2 autoescape).
 - **Tool delivery is self-contained**: the plugin sends the result card and the downloaded file itself, so the model no longer relays local paths and nothing depends on `send_message_to_user`'s file allow-list or on `computer_use_runtime`.
+- **Search, paging and quota checks are capped at 20 seconds**: when mirrors are flaky, trying them one by one used to drag a whole turn out for minutes; the cap replies with a hint to retry. Card rendering has its own 15-second cap and falls back to plain text.
 - **Descriptions reach the model with the search results**: each book line in a tool result is followed by a cleaned description (HTML stripped, single line, length-capped) so the model can tell editions apart instead of searching again; downloads stream to disk and report elapsed time and remaining quota once at the end.
 
 ### Removed

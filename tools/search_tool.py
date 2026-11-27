@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from astrbot.core.agent.run_context import ContextWrapper
@@ -15,7 +16,13 @@ from pydantic.dataclasses import dataclass
 from ..zlib_errors import ZlibError
 from ..zlib_models import book_text_lines, fenced_block
 from ..zlib_service import ZlibService
-from .common import deliver, session_key
+from .common import TOOL_DEADLINE, deliver, session_key
+
+# 超时后交给模型的固定短语：此时没拿到任何书目，别让模型编造结果
+TIMEOUT_TEXT = (
+    f"搜索超时：镜像在 {TOOL_DEADLINE:.0f} 秒内没有返回结果，"
+    "没有拿到任何书目。稍后再试或换个关键词，不要凭猜测回答用户。"
+)
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -71,14 +78,19 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
             return "插件未初始化，请检查插件配置"
 
         try:
-            outcome = await self.service.search(
-                session_key(context),
-                query,
-                limit=_as_int(kwargs.get("limit")),
-                page=_as_int(kwargs.get("page")) or 1,
-                language=str(kwargs.get("language") or ""),
-                extension=str(kwargs.get("extension") or ""),
+            outcome = await asyncio.wait_for(
+                self.service.search(
+                    session_key(context),
+                    query,
+                    limit=_as_int(kwargs.get("limit")),
+                    page=_as_int(kwargs.get("page")) or 1,
+                    language=str(kwargs.get("language") or ""),
+                    extension=str(kwargs.get("extension") or ""),
+                ),
+                TOOL_DEADLINE,
             )
+        except asyncio.TimeoutError:
+            return TIMEOUT_TEXT
         except ZlibError as e:
             return f"搜索失败：{e.message}"
 

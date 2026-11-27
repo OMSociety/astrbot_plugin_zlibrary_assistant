@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import tempfile
 import types
@@ -162,6 +163,21 @@ class TestAdminOnly:
         assert results[0].payload.startswith("正在下载《State and Revolution》")
         assert results[-1].payload.startswith("已发送 book.pdf")
         assert "剩余 3 次" in results[-1].payload
+
+
+class TestSearchTimeout:
+    @pytest.mark.asyncio
+    async def test_search_command_reports_timeout_instead_of_hanging(self, monkeypatch):
+        class Hanging(Service):
+            async def search(self, *_a, **_k):
+                await asyncio.sleep(5)
+
+        monkeypatch.setattr(plugin_main, "TOOL_DEADLINE", 0.01)
+        (result,) = await run(
+            make_plugin(Hanging()).cmd_search(Event("zlib 搜索 资本论"))
+        )
+        assert result.kind == "plain"
+        assert result.payload.startswith("搜索超时")
 
 
 class TestHelp:
