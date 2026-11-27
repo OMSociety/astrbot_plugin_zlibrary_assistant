@@ -16,29 +16,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **配置项 `search_timeout`**：搜索、翻页与额度查询的超时（秒），默认 30，范围 5-300；LLM 工具与 `/zlib` 指令共用。
 - **镜像共享探测**：域名池没有 300 秒内成功过的镜像时，第一次搜索前并发探测全部镜像（单个最多 10 秒），结果写入域名池，所有会话共用；并发搜索共用同一次探测，镜像全部不可达时两次探测至少间隔 60 秒，后台预热也先探测一次。
+- **下载在后台进行**：`zlib_download_book` 提交后立即返回，模型的回合随之结束，下载期间同一会话仍可正常对话；文件下载完成后由插件直接发给用户，失败时也由插件直接说明原因，不再唤醒模型。同一本书重复提交只下一次。
+- **下载按空闲判停**：连续 30 秒没有收到数据才判定中断，只要数据仍在到达，大文件慢速下载不会被总时限掐断；取下载链接限时 30 秒，下载后刷新额度限时 10 秒。
+- **下载并发上限 2**：同时进行的下载最多两个，其余排队；进行中的下载先占住所用账号的额度，并发下载不会重复占用同一份额度。
 
 ### 变更
 
 - **搜索、翻页与额度查询的默认超时由 20 秒放宽到 30 秒**：每个不可达的镜像要耗掉约 8 秒连接超时，20 秒只够换两个域名，慢网络下搜索常在拿到结果前超时，模型随即反复重搜。
 - 超时提示按实际配置值显示秒数，指令侧的提示同时指出可调大 `search_timeout`。
+- **下载不再占用对话**：下载工具由同步等待改为提交即返回，成功与失败都由插件主动发给用户；额度只有全部用完时才作为一次提示交给模型，其余时候不再出现在工具结果里。
 
 ### 移除
 
 - **`/zlib 3` 下载简写**：下载统一用 `/zlib 下载 3`（或 `/zlib dl 3`）。裸数字不再被插件截获。
+- **内置镜像 `z-lib.by`**：该域名已不可用，从内置域名列表移除；`domains` 配置项里的范例域名改用 `z-lib.sk`。
 
 ### Added
 
 - **`search_timeout` option**: timeout in seconds for search, paging and quota checks; default 30, range 5-300; shared by the LLM tools and the `/zlib` commands.
 - **Shared mirror probe**: when no mirror has succeeded within the last 300 seconds, the first search probes every mirror concurrently (at most 10 seconds each) and writes the result into the domain pool, shared by all sessions; concurrent searches share one probe, and when no mirror is reachable probes are at least 60 seconds apart; background warm-up probes first as well.
+- **Downloads run in the background**: `zlib_download_book` returns as soon as the download is submitted, so the model's turn ends and the same session stays usable while the file is transferring; the plugin sends the finished file to the user, and on failure states the reason itself instead of waking the model. Submitting the same book twice downloads it once.
+- **Downloads stop on idleness, not on a fixed total**: transfer is abandoned only after 30 seconds without receiving data, so a large slow download keeps going as long as bytes are arriving; the download link request is limited to 30 seconds and the post-download quota refresh to 10 seconds.
+- **At most two downloads run at once**: the rest queue up, and an in-flight download reserves the quota of the account it uses so concurrent downloads cannot both spend the same remaining download.
 
 ### Changed
 
 - **The default timeout for search, paging and quota checks is raised from 20 to 30 seconds**: every unreachable mirror burns about 8 seconds on its connect timeout, so 20 seconds only covers two domains; on a slow network searches often time out before any result arrives and the model then searches again and again.
 - The timeout message shows the configured number of seconds, and the command-side message points out that `search_timeout` can be raised.
+- **Downloads no longer block the conversation**: the download tool returns immediately instead of waiting, and both the finished file and any failure are sent to the user by the plugin; remaining quota reaches the model only once, when the pool is used up.
 
 ### Removed
 
 - **The `/zlib 3` download shorthand**: use `/zlib download 3` (or `/zlib dl 3`) for downloads. A bare number is no longer intercepted by the plugin.
+- **The built-in mirror `z-lib.by`**: the domain is no longer reachable and is dropped from the built-in list; the example in the `domains` option now uses `z-lib.sk`.
 
 ## [1.2.0] - 2026-11-27
 

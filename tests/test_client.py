@@ -29,11 +29,14 @@ from stubs import (
 
 from astrbot_plugin_zlibrary_assistant import zlib_client, zlib_security
 from astrbot_plugin_zlibrary_assistant.zlib_client import (
+    DOWNLOAD_IDLE_TIMEOUT,
+    DOWNLOAD_TOTAL_CAP,
     EP_DOMAINS,
     EP_FILE,
     EP_LOGIN,
     EP_PROFILE,
     EP_SEARCH,
+    LINK_TIMEOUT,
     LOGIN_RETRY_COOLDOWN,
     PROBE_MIN_INTERVAL,
     PROBE_TTL,
@@ -105,8 +108,12 @@ def fake_fetch(
     """替换 guarded_get：返回给定响应（body 为 None 表示被安全校验拒绝），记录调用。"""
     calls = []
 
-    async def guarded_get(url, *, headers=None, cookies=None, timeout_total):
-        calls.append({"url": url, "timeout_total": timeout_total})
+    async def guarded_get(
+        url, *, headers=None, cookies=None, timeout_total, sock_read=None
+    ):
+        calls.append(
+            {"url": url, "timeout_total": timeout_total, "sock_read": sock_read}
+        )
         if body is None:
             return None, err or "blocked"
         return FakeResponse(status, body=body, chunk_size=chunk_size), ""
@@ -565,7 +572,8 @@ class TestFetchFile:
         body = bytes(range(256)) * 100
         calls = fake_fetch(client, monkeypatch, body, chunk_size=777)
         assert await client._fetch_file(self.URL) == body
-        assert calls[0]["timeout_total"] == client.timeout * 4
+        assert calls[0]["timeout_total"] == DOWNLOAD_TOTAL_CAP
+        assert calls[0]["sock_read"] == DOWNLOAD_IDLE_TIMEOUT
 
     @pytest.mark.asyncio
     async def test_cap_boundary_and_zero_config_floor(self, make_client, monkeypatch):
@@ -858,7 +866,9 @@ class TestFetchCover:
         client = make_client(domains=["https://mine.example"])
         seen = {}
 
-        async def guarded_get(url, *, headers=None, cookies=None, timeout_total):
+        async def guarded_get(
+            url, *, headers=None, cookies=None, timeout_total, sock_read=None
+        ):
             seen.update(url=url, headers=headers, timeout=timeout_total)
             return FakeResponse(200, body=_png_bytes()), ""
 
@@ -1120,3 +1130,81 @@ class TestNoCredentialLeak:
     def test_account_status_has_no_credentials(self, make_client):
         text = str(make_client([remix(), pwd()]).account_status())
         assert SECRET_KEY not in text and SECRET_PW not in text
+
+    # ---------- 下载时限与额度预占 ----------
+
+    @pytest.mark.asyncio
+    async def test_idle_timeout_reported_as_data_stall(self, make_client, monkeypatch):
+        """传输中超过空闲时限由 aiohttp 抛读超时，要报成「没有收到数据」而不是笼统的网络异常。"""
+        client = make_client([remix(logged_in=True)])
+        fake_fetch(client, monkeypatch)
+        client.api.on("GET", file_path(make_book(1)), download_link_response())
+
+        async def stall(*a, **kw):
+            raise aiohttp.ServerTimeoutError("timeout")
+
+        monkeypatch.setattr(
+            "astrbot_plugin_zlibrary_assistant.zlib_client.read_limited", stall
+        )
+        with pytest.raises(ZlibError) as exc:
+            await client.download(make_book(1))
+        assert exc.value.category == "network_error"
+        assert "没有收到数据" in exc.value.message
+
+    @pytest.mark.asyncio
+    async def test_link_request_has_its_own_timeout(self, make_client, monkeypatch):
+        client = make_client([remix(logged_in=True)])
+        real_wait_for = asyncio.wait_for
+        seen = []
+
+        def wait_for(aw, timeout):
+            seen.append(timeout)
+            aw.close()
+            raise asyncio.TimeoutError
+
+        monkeypatch.setattr(asyncio, "wait_for", wait_for)
+        with pytest.raises(ZlibError) as exc:
+            await client.get_download_link(client.accounts[0], make_book(1))
+        monkeypatch.setattr(asyncio, "wait_for", real_wait_for)
+        assert exc.value.category == "network_error"
+        assert "获取下载链接" in exc.value.message
+        assert LINK_TIMEOUT in seen
+
+    @pytest.mark.asyncio
+    async def test_quota_refresh_timeout_keeps_local_count(
+        self, make_client, monkeypatch
+    ):
+        client = make_client([remix(logged_in=True, downloads_today=2)])
+
+        async def boom(*a, **kw):
+            raise asyncio.TimeoutError
+
+        monkeypatch.setattr(client, "_api", boom)
+        account = client.accounts[0]
+        await client._refresh_quota(account)
+        assert account.downloads_today == 2
+
+    @pytest.mark.asyncio
+    async def test_in_flight_download_reserves_quota(self, make_client, monkeypatch):
+        """只剩一次额度时，进行中的下载先把这次额度占住，另一个下载不会重复占用。"""
+        client = make_client(
+            [remix("only", logged_in=True, downloads_today=9, downloads_limit=10)]
+        )
+        release = asyncio.Event()
+        started = []
+
+        async def transfer(account, book, *, sink, on_progress):
+            started.append(account.name)
+            await release.wait()
+            return "x.pdf", 1, b"x"
+
+        monkeypatch.setattr(client, "_transfer", transfer)
+        first = asyncio.create_task(client.download(make_book(1)))
+        await asyncio.sleep(0.01)
+        with pytest.raises(ZlibError) as exc:
+            await client.download(make_book(2))
+        assert exc.value.category == "quota_exhausted"
+        assert started == ["only"]
+        release.set()
+        await first
+        assert client._reserved == {"only": 0}

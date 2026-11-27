@@ -51,6 +51,13 @@ PROBE_MIN_INTERVAL = 60.0
 PROBE_CONCURRENCY = 12
 PROBE_TIMEOUT = 10.0
 
+# 下载：传输按「空闲」判停——连续 DOWNLOAD_IDLE_TIMEOUT 秒没收到数据才放弃，
+# 只要数据在持续到达，大文件慢速下载也不会被总时限掐断；DOWNLOAD_TOTAL_CAP 只是
+# 兜底上限。取直链与额度刷新各自带时限，镜像池逐个试域名时不会无限拖长一次下载。
+DOWNLOAD_IDLE_TIMEOUT = 30.0
+DOWNLOAD_TOTAL_CAP = 1800.0
+LINK_TIMEOUT = 30.0
+QUOTA_REFRESH_TIMEOUT = 10.0
 _AUTH_KEYWORDS = ("login", "password", "authoriz", "unauthor", "credential")
 _QUOTA_KEYWORDS = ("limit", "daily", "quota", "exceed")
 
@@ -122,6 +129,9 @@ class ZlibClient:
         self._login_lock = asyncio.Lock()
         self._last_login_attempt: dict[str, float] = {}
         self._probe_task: asyncio.Task | None = None
+        # 下载进行中占用的额度：选号与占位在同一个同步段内完成，并发下载不会同时选中
+        # 只剩一次额度的账号
+        self._reserved: dict[str, int] = {}
         self._last_probe_at = float("-inf")
 
     async def close(self) -> None:
@@ -238,8 +248,12 @@ class ZlibClient:
 
     def _usable_accounts(self) -> list[Account]:
         """已登录且有额度的账号，剩余额度多者优先。"""
-        usable = [a for a in self.accounts if a.logged_in and a.has_quota()]
-        return sorted(usable, key=lambda a: a.downloads_left, reverse=True)
+        usable = [a for a in self.accounts if a.logged_in and self._left(a) > 0]
+        return sorted(usable, key=self._left, reverse=True)
+
+    def _left(self, account: Account) -> int:
+        """剩余额度减去正在进行的下载已占用的次数。"""
+        return account.downloads_left - self._reserved.get(account.name, 0)
 
     # ---------- 域名发现 ----------
 
@@ -353,12 +367,20 @@ class ZlibClient:
 
     async def get_download_link(self, account: Account, book: Book) -> tuple[str, str]:
         """获取下载直链，返回 (直链, 安全文件名)。"""
-        resp = await self._api(
-            "GET",
-            EP_FILE.format(book_id=book.id, hash_id=book.hash),
-            account=account,
-            what="获取下载链接",
-        )
+        try:
+            resp = await asyncio.wait_for(
+                self._api(
+                    "GET",
+                    EP_FILE.format(book_id=book.id, hash_id=book.hash),
+                    account=account,
+                    what="获取下载链接",
+                ),
+                LINK_TIMEOUT,
+            )
+        except asyncio.TimeoutError as e:
+            raise ZlibError(
+                "network_error", f"获取下载链接超过 {LINK_TIMEOUT:.0f} 秒未响应"
+            ) from e
         file_info = resp.get("file") or {}
         link = file_info.get("downloadLink")
         if not link:
@@ -394,7 +416,9 @@ class ZlibClient:
         为空时把全部内容收进返回值（小文件与测试用）。
         """
         resp, err = await self.transport.guarded_get(
-            link, timeout_total=self.timeout * 4
+            link,
+            timeout_total=DOWNLOAD_TOTAL_CAP,
+            sock_read=DOWNLOAD_IDLE_TIMEOUT,
         )
         if resp is None:
             raise ZlibError(
@@ -425,11 +449,13 @@ class ZlibClient:
                     size = received
                 else:
                     size = len(content)
-        except (
-            aiohttp.ClientConnectorError,
-            aiohttp.ServerTimeoutError,
-            asyncio.TimeoutError,
-        ) as e:
+        except (aiohttp.ServerTimeoutError, asyncio.TimeoutError) as e:
+            raise ZlibError(
+                "network_error",
+                f"下载中断：超过 {DOWNLOAD_IDLE_TIMEOUT:.0f} 秒没有收到数据",
+                str(e),
+            ) from e
+        except aiohttp.ClientConnectorError as e:
             raise ZlibError("network_error", "下载网络异常", str(e)) from e
         except aiohttp.ClientError as e:
             raise ZlibError("network_error", "下载失败", str(e)) from e
@@ -495,6 +521,7 @@ class ZlibClient:
             if account is None:
                 break
             tried.add(account.name)
+            self._reserved[account.name] = self._reserved.get(account.name, 0) + 1
             try:
                 filename, size, content = await self._transfer(
                     account, book, sink=sink, on_progress=on_progress
@@ -510,6 +537,8 @@ class ZlibClient:
                     last_error = e
                     continue
                 raise
+            finally:
+                self._reserved[account.name] -= 1
             return account, filename, content
         if last_error is not None and last_error.category == "auth_failed":
             raise last_error
@@ -533,9 +562,15 @@ class ZlibClient:
     async def _refresh_quota(self, account: Account) -> None:
         """下载后与服务端对齐额度；失败则保留本地累计值。"""
         try:
-            resp = await self._api("GET", EP_PROFILE, account=account, what="刷新额度")
+            resp = await asyncio.wait_for(
+                self._api("GET", EP_PROFILE, account=account, what="刷新额度"),
+                QUOTA_REFRESH_TIMEOUT,
+            )
         except ZlibError as e:
             logger.debug(f"额度刷新失败: {e}")
+            return
+        except asyncio.TimeoutError:
+            logger.debug("额度刷新超时")
             return
         self._apply_profile(account, resp)
 

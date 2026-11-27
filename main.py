@@ -16,6 +16,7 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 from astrbot.core.message.components import File, Image
+from astrbot.core.message.message_event_result import MessageChain
 
 from .tools.common import clamp_deadline
 from .tools.download_tool import ZlibDownloadBookTool
@@ -111,7 +112,9 @@ class ZLibraryAssistantPlugin(Star):
         self.context.add_llm_tools(
             ZlibSearchBooksTool(service=self.service, deadline=self.search_timeout),
             ZlibDownloadBookTool(
-                service=self.service, admin_only=self.download_admin_only
+                service=self.service,
+                admin_only=self.download_admin_only,
+                push=self._push,
             ),
             ZlibGetStatusTool(client=self.client, deadline=self.search_timeout),
         )
@@ -149,6 +152,14 @@ class ZLibraryAssistantPlugin(Star):
                     f"ZLibrary 尚未就绪，{_WARMUP_DELAYS[attempt]} 秒后重试: {e}"
                 )
 
+    async def _push(self, umo: str, chain: MessageChain) -> bool:
+        """主动向会话发送消息（后台下载完成后推送文件或失败原因）。"""
+        try:
+            return bool(await self.context.send_message(umo, chain))
+        except Exception as e:  # noqa: BLE001 - 推送失败由调用方退回其它发送方式
+            logger.warning(f"主动推送消息失败: {type(e).__name__}: {e}")
+            return False
+
     async def terminate(self):
         """插件卸载/重载时取消预热任务并关闭网络会话。"""
         if self._warmup_task is not None and not self._warmup_task.done():
@@ -159,6 +170,7 @@ class ZLibraryAssistantPlugin(Star):
                 logger.debug("后台预热任务已取消")
             except Exception as e:  # noqa: BLE001 - 关闭阶段异常不再向上抛
                 logger.debug(f"后台预热任务异常结束: {e}")
+        await self.service.cancel_downloads()
         await self.client.close()
 
     # ---------- 指令 ----------

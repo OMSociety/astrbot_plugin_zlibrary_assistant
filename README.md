@@ -70,7 +70,7 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `zlib_search_books` | `query`（必填）、`limit`、`page`、`language`、`extension` | 搜索，插件自动发出结果卡片，同时把带 id 与简介的文本书目交给模型 |
-| `zlib_download_book` | `book_id`（必填） | 按搜索结果 id 下载，仅在用户明确要求时调用；文件由插件发出 |
+| `zlib_download_book` | `book_id`（必填） | 按搜索结果 id 下载，仅在用户明确要求时调用；提交后立即返回，下载在后台进行，文件与失败原因都由插件直接发给用户 |
 | `zlib_get_status` | 无 | 账号池状态，仅管理员会话可用 |
 
 ```
@@ -86,7 +86,7 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 
 ## 镜像域名与故障转移
 
-- 内置域名初始按此顺序尝试，之后按实测结果自动重排（近期可用的置顶，延迟低者优先）：官方入口 `z-library.sk`、`z-lib.sk`、`z-library.im`、`z-library.hn` 优先；其后是镜像 `z-lib.by`、`z-library.website`、`z-lib.gd`、`z-lib.gl`、`article.sk`、`articles.sk`、`z-library.qa`、`zlib.bz`。
+- 内置域名初始按此顺序尝试，之后按实测结果自动重排（近期可用的置顶，延迟低者优先）：官方入口 `z-library.sk`、`z-lib.sk`、`z-library.im`、`z-library.hn` 优先；其后是镜像 `z-library.website`、`z-lib.gd`、`z-lib.gl`、`article.sk`、`articles.sk`、`z-library.qa`、`zlib.bz`。
 - 域名池没有近期可用镜像时（刚启动、或久未搜索），第一次搜索前先并发探测全部镜像（单个最多 10 秒），结果写入域名池，所有会话共用；探测期间的并发搜索共用同一次探测，镜像全部不可达时至少间隔 60 秒才再探测。后台预热也会先探测一次。
 - 请求带 `source: android` 头访问镜像的 E-API；网络错误、证书错误、浏览器验证拦截、Cloudflare 拦截、限流都会触发故障转移，并让该镜像按错误类型冷却一段时间。
 - `domains` 中填写的域名优先级最高；其后是内置镜像；从镜像学到的域名排在最后，且只用于不带账号凭证的搜索请求。
@@ -206,6 +206,8 @@ services:
 | `tools/` | 三个 LLM 工具 |
 
 下载文件保存在 `<data>/plugin_data/zlibrary_assistant/books/`，保留 7 天。
+
+下载在后台进行，不占用对话：模型提交后立即返回，同会话可以继续聊天；文件下载完由插件直接发给用户，失败时也由插件直接说明原因。同时进行的下载最多两个，其余排队；传输连续 30 秒没有收到数据才判为中断，数据持续到达时大文件不会被总时限掐断。
 
 ---
 

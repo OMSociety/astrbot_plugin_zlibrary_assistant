@@ -13,6 +13,7 @@ from stubs import FakeClient, RecordingLogger, ZlibError, make_account, make_boo
 from astrbot_plugin_zlibrary_assistant import zlib_service
 from astrbot_plugin_zlibrary_assistant.zlib_cards import SEARCH_CARD_TMPL
 from astrbot_plugin_zlibrary_assistant.zlib_service import (
+    DOWNLOAD_CONCURRENCY,
     DOWNLOAD_RETENTION_DAYS,
     MAX_SEARCH_LIMIT,
     ZlibService,
@@ -475,6 +476,120 @@ class TestPurgeExpired:
         svc._purge_expired()
         assert old.exists()
         assert rec.lines
+
+
+# ---------- 后台下载 ----------
+
+
+class TestBackgroundDownload:
+    @staticmethod
+    def _gate(client, monkeypatch):
+        release = asyncio.Event()
+        live = {"now": 0, "peak": 0}
+
+        async def download(book, *, sink=None, on_progress=None):
+            live["now"] += 1
+            live["peak"] = max(live["peak"], live["now"])
+            try:
+                await release.wait()
+                if sink is not None:
+                    await sink(f"x{book.id}.pdf", b"x")
+                    return make_account("a"), f"x{book.id}.pdf", b""
+            finally:
+                live["now"] -= 1
+            return make_account("a"), f"x{book.id}.pdf", b"x"
+
+        monkeypatch.setattr(client, "download", download)
+        return release, live
+
+    @pytest.mark.asyncio
+    async def test_concurrency_is_capped_and_queued(self, make_service, monkeypatch):
+        svc, client = make_service()
+        release, live = self._gate(client, monkeypatch)
+        done = []
+
+        async def on_done(d):
+            done.append(d)
+
+        async def on_error(text):
+            raise AssertionError(f"不该失败: {text}")
+
+        for i in range(1, 5):
+            assert svc.start_download(make_book(i), on_done=on_done, on_error=on_error)
+        await asyncio.sleep(0.05)
+        assert live["peak"] == DOWNLOAD_CONCURRENCY
+        release.set()
+        await asyncio.gather(*list(svc._download_tasks))
+        assert live["peak"] == DOWNLOAD_CONCURRENCY
+        assert len(done) == 4
+
+    @pytest.mark.asyncio
+    async def test_same_book_submitted_twice_runs_once(self, make_service, monkeypatch):
+        svc, client = make_service()
+        release, _ = self._gate(client, monkeypatch)
+        calls = []
+
+        async def on_done(d):
+            calls.append(d)
+
+        async def on_error(text):
+            raise AssertionError(text)
+
+        book = make_book(1)
+        assert svc.start_download(book, on_done=on_done, on_error=on_error) is True
+        assert svc.start_download(book, on_done=on_done, on_error=on_error) is False
+        release.set()
+        await asyncio.gather(*list(svc._download_tasks))
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_error_hook_gets_one_plain_sentence(self, make_service):
+        svc, client = make_service()
+        client.download_error = ZlibError("quota_exhausted", "额度用完了", "secret")
+        seen = []
+
+        async def on_done(d):
+            raise AssertionError("不该成功")
+
+        async def on_error(text):
+            seen.append(text)
+
+        assert svc.start_download(make_book(1), on_done=on_done, on_error=on_error)
+        await asyncio.gather(*list(svc._download_tasks))
+        assert seen == ["《Title 1》下载失败：额度用完了"]
+
+    @pytest.mark.asyncio
+    async def test_unexpected_error_is_not_leaked_to_user(self, make_service):
+        svc, client = make_service()
+
+        async def boom(book, *, sink=None, on_progress=None):
+            raise RuntimeError("Traceback: secret detail")
+
+        client.download = boom
+        seen = []
+
+        async def on_error(text):
+            seen.append(text)
+
+        svc.start_download(make_book(1), on_done=on_error, on_error=on_error)
+        await asyncio.gather(*list(svc._download_tasks))
+        assert seen == ["《Title 1》下载失败，请稍后再试"]
+
+    @pytest.mark.asyncio
+    async def test_cancel_downloads_stops_all_tasks(self, make_service, monkeypatch):
+        svc, client = make_service()
+        release, _ = self._gate(client, monkeypatch)
+
+        async def on_done(d):
+            raise AssertionError("不该完成")
+
+        async def on_error(text):
+            raise AssertionError("取消不该报错给用户")
+
+        svc.start_download(make_book(1), on_done=on_done, on_error=on_error)
+        await asyncio.sleep(0.01)
+        await svc.cancel_downloads()
+        assert svc._active_downloads == set()
 
 
 # ---------- 文本格式 ----------

@@ -460,11 +460,14 @@ class ZlibTransport:
         headers: dict | None = None,
         cookies: dict | None = None,
         timeout_total: float,
+        sock_read: float | None = None,
     ) -> tuple[aiohttp.ClientResponse | None, str]:
         """带 SSRF 校验的 GET：不自动跟随重定向，逐跳校验（最多 3 跳）。
 
         每一跳都重新校验目标为公网 http/https 地址（is_safe_public_url），
         防止 API 返回的 URL 或重定向把请求带去内网。
+        sock_read：两次收到数据之间允许的最长空闲秒数（含等待响应头），用于判定传输卡死；
+        与 timeout_total（整个请求含读完响应体的上限）互相独立。
         返回 (响应, 错误信息)；成功时响应由调用方负责关闭。
         """
         session = await self.get_session()
@@ -485,7 +488,9 @@ class ZlibTransport:
                     # 封面/书籍字节（内容会内嵌进发给用户的模板或落盘）
                     headers=headers,
                     cookies=cookies,
-                    timeout=aiohttp.ClientTimeout(total=timeout_total),
+                    timeout=aiohttp.ClientTimeout(
+                        total=timeout_total, sock_read=sock_read
+                    ),
                 )
             except (
                 aiohttp.ClientConnectorError,

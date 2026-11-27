@@ -31,7 +31,6 @@ BUILTIN_MIRRORS: tuple[str, ...] = (
     "z-lib.sk",
     "z-library.im",
     "z-library.hn",
-    "z-lib.by",
     "z-library.website",
     "z-lib.gd",
     "z-lib.gl",

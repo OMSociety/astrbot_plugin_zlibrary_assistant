@@ -280,7 +280,7 @@ class TestCall:
         assert exc.value.category == "all_domains_failed"
         assert "domains" in exc.value.message
         assert exc.value.detail.count("diamwall_blocked") == pool.max_attempts
-        assert "z-lib.by" in exc.value.detail
+        assert "z-lib.sk" in exc.value.detail
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("category", ["network_error", "tls_error"])

@@ -104,6 +104,49 @@ class TestWarmup:
         await plugin._warmup()
         assert order == ["probe", "discover", "login"]
 
+    @pytest.mark.asyncio
+    async def test_terminate_cancels_background_downloads_before_close(self):
+        order = []
+
+        class Service:
+            async def cancel_downloads(self):
+                order.append("cancel")
+
+        class Client:
+            async def close(self):
+                order.append("close")
+
+        plugin = make_plugin()
+        plugin.service = Service()
+        plugin.client = Client()
+        plugin._warmup_task = None
+        await plugin.terminate()
+        assert order == ["cancel", "close"]
+
+    @pytest.mark.asyncio
+    async def test_push_sends_through_the_plugin_context(self):
+        sent = []
+
+        class Context:
+            async def send_message(self, umo, chain):
+                sent.append((umo, chain))
+                return True
+
+        plugin = make_plugin()
+        plugin.context = Context()
+        assert await plugin._push("umo-1", "chain") is True
+        assert sent == [("umo-1", "chain")]
+
+    @pytest.mark.asyncio
+    async def test_push_failure_is_reported_as_false(self):
+        class Context:
+            async def send_message(self, umo, chain):
+                raise RuntimeError("boom")
+
+        plugin = make_plugin()
+        plugin.context = Context()
+        assert await plugin._push("umo-1", "chain") is False
+
 
 class TestDetail:
     @pytest.mark.asyncio

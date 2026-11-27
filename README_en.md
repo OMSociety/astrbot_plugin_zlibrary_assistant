@@ -68,7 +68,7 @@ The language option accepts `zh`, `en`, `chinese`, `english` and similar. Search
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `zlib_search_books` | `query` (required), `limit`, `page`, `language`, `extension` | Search; the plugin sends the result card itself and hands the model a text list with ids and descriptions |
-| `zlib_download_book` | `book_id` (required) | Download by search-result id; called only when the user explicitly asks; the plugin sends the file |
+| `zlib_download_book` | `book_id` (required) | Download by search-result id; called only when the user explicitly asks; returns as soon as the download is queued, and the plugin sends both the finished file and any failure reason itself |
 | `zlib_get_status` | none | Account pool status; admin sessions only |
 
 ```
@@ -84,7 +84,7 @@ Fence markers are stripped from book fields and the fields are truncated before 
 
 ## Mirrors and failover
 
-- Built-in domains are tried in this order initially, then re-ranked automatically by observed results (recently working ones first, lower latency preferred): the official entries `z-library.sk`, `z-lib.sk`, `z-library.im`, `z-library.hn` first, then the mirrors `z-lib.by`, `z-library.website`, `z-lib.gd`, `z-lib.gl`, `article.sk`, `articles.sk`, `z-library.qa`, `zlib.bz`.
+- Built-in domains are tried in this order initially, then re-ranked automatically by observed results (recently working ones first, lower latency preferred): the official entries `z-library.sk`, `z-lib.sk`, `z-library.im`, `z-library.hn` first, then the mirrors `z-library.website`, `z-lib.gd`, `z-lib.gl`, `article.sk`, `articles.sk`, `z-library.qa`, `zlib.bz`.
 - When the domain pool has no recently working mirror (just started, or idle for a while), the first search probes every mirror concurrently (at most 10 seconds each) and writes the result into the pool, shared by all sessions; searches that arrive during the probe share that single probe, and when no mirror is reachable the next probe waits at least 60 seconds. Background warm-up probes once as well.
 - Requests carry the `source: android` header to the mirrors' E-API. Network errors, certificate errors, browser-verification blocks, Cloudflare blocks and rate limiting trigger failover and put that mirror on a cooldown that depends on the error type.
 - Domains in `domains` have the highest priority, followed by the built-in mirrors; domains learned from a mirror come last and serve only requests without account credentials.
@@ -204,6 +204,8 @@ Install and start Tor with the SOCKS port listening on localhost only, and set `
 | `tools/` | The three LLM tools |
 
 Downloads are saved under `<data>/plugin_data/zlibrary_assistant/books/` and kept for 7 days.
+
+Downloads run in the background and do not occupy the conversation: the model returns immediately after submitting, so the session stays usable; the plugin sends the finished file itself and states the reason on failure. At most two downloads run at once and the rest queue up; a transfer is abandoned only after 30 seconds without receiving data, so a large file keeps going as long as bytes arrive.
 
 ---
 

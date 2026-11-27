@@ -36,7 +36,7 @@
     },
     "domains": {
       "description": "Extra mirror domains (optional)",
-      "hint": "The plugin ships a set of directly reachable mirrors with automatic failover; domains listed here take priority. Enter host names only, e.g. z-lib.by. Onion addresses need a Tor SOCKS proxy. The official main domains require browser verification and cannot be reached directly"
+      "hint": "The plugin ships a set of directly reachable mirrors with automatic failover; domains listed here take priority. Enter host names only, e.g. z-lib.sk. Onion addresses need a Tor SOCKS proxy. The official main domains require browser verification and cannot be reached directly"
     },
     "proxy": {
       "description": "HTTP or SOCKS proxy (optional)",

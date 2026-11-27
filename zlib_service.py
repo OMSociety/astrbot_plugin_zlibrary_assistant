@@ -40,6 +40,14 @@ DOWNLOAD_RETENTION_DAYS = 7
 
 MAX_SEARCH_LIMIT = MAX_CARD_BOOKS
 
+# 同时进行的下载数：超出的排队等待，避免多人同时下载时并开大量传输流、
+# 争抢同一批账号的额度
+DOWNLOAD_CONCURRENCY = 2
+
+# 后台下载的结果回调：成功收到 Downloaded，失败收到给用户看的一句话
+DoneHook = Callable[["Downloaded"], Awaitable[None]]
+ErrorHook = Callable[[str], Awaitable[None]]
+
 
 @dataclass
 class SearchOutcome:
@@ -76,6 +84,9 @@ class ZlibService:
         self.card_enabled = card_enabled
         self.prefix = command_prefix
         self.memory = SearchMemory()
+        self._download_slots = asyncio.Semaphore(DOWNLOAD_CONCURRENCY)
+        self._active_downloads: set[int] = set()
+        self._download_tasks: set[asyncio.Task] = set()
 
     # ---------- 搜索 ----------
 
@@ -179,6 +190,51 @@ class ZlibService:
         except OSError as e:
             logger.warning(f"清理过期下载文件失败: {e}")
 
+    def start_download(
+        self, book: Book, *, on_done: DoneHook, on_error: ErrorHook
+    ) -> bool:
+        """在后台下载一本书，立即返回，不占用调用方所在的对话回合。
+
+        成功调用 on_done，失败调用 on_error（只给用户看的一句话，异常原文进日志）。
+        同一本书已在下载时返回 False，不重复提交。
+        """
+        if book.id in self._active_downloads:
+            return False
+        self._active_downloads.add(book.id)
+        task = asyncio.create_task(self._run_download(book, on_done, on_error))
+        self._download_tasks.add(task)
+        task.add_done_callback(self._download_tasks.discard)
+        return True
+
+    async def _run_download(
+        self, book: Book, on_done: DoneHook, on_error: ErrorHook
+    ) -> None:
+        label = book.title or str(book.id)
+        try:
+            try:
+                done = await self.download(book)
+            except ZlibError as e:
+                logger.info(f"后台下载失败: {label}: {e}")
+                await on_error(f"《{label}》下载失败：{e.message}")
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 - 后台任务不能把异常抛进事件循环
+                logger.error(f"后台下载异常: {label}: {type(e).__name__}: {e}")
+                await on_error(f"《{label}》下载失败，请稍后再试")
+                return
+            await on_done(done)
+        finally:
+            self._active_downloads.discard(book.id)
+
+    async def cancel_downloads(self) -> None:
+        """插件卸载时取消全部后台下载并等它们收尾。"""
+        tasks = list(self._download_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def download(
         self,
         book: Book,
@@ -187,8 +243,17 @@ class ZlibService:
     ) -> Downloaded:
         """下载一本书并写入下载目录；边收边写，内存里只留一个数据块。
 
+        同时进行的下载不超过 DOWNLOAD_CONCURRENCY，其余排队。
         on_progress: `async (已读字节, 声明总字节)`，可用来记录进度或判断卡死。
         """
+        async with self._download_slots:
+            return await self._download(book, on_progress)
+
+    async def _download(
+        self,
+        book: Book,
+        on_progress: Callable[[int, int], Awaitable[None]] | None,
+    ) -> Downloaded:
         started = time.monotonic()
         handle = None
         target: Path | None = None
@@ -252,6 +317,11 @@ class ZlibService:
     def pool_left(self) -> int:
         """账号池剩余的下载次数总和；只算已登录的账号。"""
         return sum(a.downloads_left for a in self.client.accounts if a.logged_in)
+
+    def quota_exhausted(self) -> bool:
+        """已登录的账号全部用完今日额度；没有已登录账号时不下结论（下载另行报错）。"""
+        accounts = [a for a in self.client.accounts if a.logged_in]
+        return bool(accounts) and self.pool_left() <= 0
 
     def quota_hint(self) -> str:
         """给卡片页脚的额度提示；没有账号时不提额度（下载另行报错）。"""

@@ -50,6 +50,10 @@ class Sent:
     def components(self):
         return [c for m in self.messages for c in m.chain]
 
+    @property
+    def text(self) -> str:
+        return "".join(getattr(c, "text", "") for m in self.messages for c in m.chain)
+
 
 def ctx(*, admin=False, umo="umo-1"):
     event = types.SimpleNamespace(
@@ -355,6 +359,11 @@ class TestSearchTool:
 # ---------- 下载工具 ----------
 
 
+async def _settle(service):
+    """等后台下载任务全部收尾。"""
+    await asyncio.gather(*list(service._download_tasks), return_exceptions=True)
+
+
 class TestDownloadTool:
     @staticmethod
     def _tool(service, **kw):
@@ -384,7 +393,8 @@ class TestDownloadTool:
         service.client.book_cache.put_many([make_book(1)])
         service.client.download_result = (make_account("a"), "x.pdf", b"x")
         result = await self._tool(service).call(ctx(admin=False), book_id=1)
-        assert result.startswith("已把文件发给用户")
+        assert result.startswith("已开始在后台下载")
+        await _settle(service)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("bad", [None, "abc", "1.5"])
@@ -401,19 +411,44 @@ class TestDownloadTool:
     async def test_numeric_string_id_accepted(self, service):
         service.client.book_cache.put_many([make_book(5)])
         service.client.download_result = (make_account("a"), "x.pdf", b"x")
-        assert (await self._tool(service).call(ctx(), book_id="5")).startswith(
-            "已把文件发给用户"
-        )
+        result = await self._tool(service).call(ctx(), book_id="5")
+        assert result.startswith("已开始在后台下载")
+        await _settle(service)
 
     @pytest.mark.asyncio
-    async def test_download_error_reported_without_traceback(self, service):
+    async def test_returns_before_transfer_finishes(self, service):
+        service.client.book_cache.put_many([make_book(1)])
+        service.client.download_result = (make_account("a"), "x.pdf", b"x")
+        gate = asyncio.Event()
+        real = service.client.download
+
+        async def slow(*a, **kw):
+            await gate.wait()
+            return await real(*a, **kw)
+
+        service.client.download = slow
+        context = ctx()
+        result = await self._tool(service).call(context, book_id=1)
+        assert "不要等待结果" in result
+        assert sent_of(context).components == []
+        gate.set()
+        await _settle(service)
+        (component,) = sent_of(context).components
+        assert component.name == "x.pdf"
+
+    @pytest.mark.asyncio
+    async def test_failure_is_pushed_to_user_not_model(self, service):
         service.client.book_cache.put_many([make_book(1)])
         service.client.download_error = ZlibError(
-            "quota_exhausted", "额度用完", "detail-secret"
+            "api_error", "镜像无响应", "detail-secret"
         )
-        result = await self._tool(service).call(ctx(), book_id=1)
-        assert result == "下载失败：额度用完"
-        assert "detail-secret" not in result
+        context = ctx()
+        result = await self._tool(service).call(context, book_id=1)
+        assert result.startswith("已开始在后台下载")
+        await _settle(service)
+        text = sent_of(context).text
+        assert text == "《Title 1》下载失败：镜像无响应"
+        assert "detail-secret" not in text
 
     @pytest.mark.asyncio
     async def test_file_sent_by_plugin_and_path_kept_out_of_text(self, service):
@@ -422,16 +457,87 @@ class TestDownloadTool:
         service.client.download_result = (account, "Book.pdf", b"x" * (2 * 1024 * 1024))
         context = ctx()
         result = await self._tool(service).call(context, book_id=1)
+        await _settle(service)
 
         saved = (service.download_dir / "Book.pdf").resolve()
         assert saved.stat().st_size == 2 * 1024 * 1024
         (component,) = sent_of(context).components
         assert (component.name, component.file) == ("Book.pdf", str(saved))
-        assert "- 书名：Title 1" in result
-        assert "- 大小：2.0 MB" in result
-        assert "额度" not in result
         assert str(saved) not in result
+        assert "额度" not in result
         assert "send_message_to_user" not in result
+
+    @pytest.mark.asyncio
+    async def test_push_used_when_available(self, service):
+        service.client.book_cache.put_many([make_book(1)])
+        service.client.download_result = (make_account("a"), "x.pdf", b"x")
+        pushed = []
+
+        async def push(umo, chain):
+            pushed.append((umo, chain))
+            return True
+
+        context = ctx(umo="umo-9")
+        await self._tool(service, push=push).call(context, book_id=1)
+        await _settle(service)
+        assert [u for u, _ in pushed] == ["umo-9"]
+        assert sent_of(context).components == []
+
+    @pytest.mark.asyncio
+    async def test_push_failure_falls_back_to_event_send(self, service):
+        service.client.book_cache.put_many([make_book(1)])
+        service.client.download_result = (make_account("a"), "x.pdf", b"x")
+
+        async def push(umo, chain):
+            return False
+
+        context = ctx()
+        await self._tool(service, push=push).call(context, book_id=1)
+        await _settle(service)
+        assert len(sent_of(context).components) == 1
+
+    @pytest.mark.asyncio
+    async def test_duplicate_submit_reported_once_in_flight(self, service):
+        service.client.book_cache.put_many([make_book(1)])
+        service.client.download_result = (make_account("a"), "x.pdf", b"x")
+        gate = asyncio.Event()
+        real = service.client.download
+
+        async def slow(*a, **kw):
+            await gate.wait()
+            return await real(*a, **kw)
+
+        service.client.download = slow
+        tool = self._tool(service)
+        first = await tool.call(ctx(), book_id=1)
+        second = await tool.call(ctx(), book_id=1)
+        assert first.startswith("已开始在后台下载")
+        assert "已经在下载中" in second
+        gate.set()
+        await _settle(service)
+
+    @pytest.mark.asyncio
+    async def test_exhausted_pool_reported_to_model_without_starting(self, service):
+        service.client.book_cache.put_many([make_book(1)])
+        service.client.accounts = [
+            make_account("a", logged_in=True, downloads_today=10, downloads_limit=10)
+        ]
+        context = ctx()
+        result = await self._tool(service).call(context, book_id=1)
+        assert "额度已用完" in result and "没有开始下载" in result
+        await _settle(service)
+        assert sent_of(context).components == []
+
+    @pytest.mark.asyncio
+    async def test_remaining_quota_never_mentioned_to_model(self, service):
+        service.client.book_cache.put_many([make_book(1)])
+        service.client.accounts = [
+            make_account("a", logged_in=True, downloads_today=9, downloads_limit=10)
+        ]
+        service.client.download_result = (make_account("a"), "x.pdf", b"x")
+        result = await self._tool(service).call(ctx(), book_id=1)
+        assert "额度" not in result and "剩余" not in result
+        await _settle(service)
 
     @pytest.mark.asyncio
     async def test_account_name_not_in_result(self, service):
@@ -441,9 +547,11 @@ class TestDownloadTool:
             "B.pdf",
             b"x",
         )
+        context = ctx()
         assert "private-account-name" not in await self._tool(service).call(
-            ctx(), book_id=1
+            context, book_id=1
         )
+        await _settle(service)
 
     @pytest.mark.asyncio
     async def test_hostile_filename_never_written_outside_download_dir(
@@ -451,6 +559,8 @@ class TestDownloadTool:
     ):
         service.client.book_cache.put_many([make_book(1)])
         service.client.download_result = (make_account("a"), "../../escape.pdf", b"x")
-        result = await self._tool(service).call(ctx(), book_id=1)
-        assert result.startswith("下载失败")
+        context = ctx()
+        await self._tool(service).call(context, book_id=1)
+        await _settle(service)
+        assert sent_of(context).text.startswith("《Title 1》下载失败")
         assert not (tmp_path.parent / "escape.pdf").exists()
