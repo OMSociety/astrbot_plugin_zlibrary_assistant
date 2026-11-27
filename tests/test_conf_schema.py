@@ -17,7 +17,7 @@ EXPECTED = {
     "card_enabled": ("bool", True),
     "download_admin_only": ("bool", False),
 }
-ACCOUNT_FIELDS = {"name", "remix_userid", "remix_userkey", "email", "password"}
+ACCOUNT_FIELDS = {"label", "remix_userid", "remix_userkey", "email", "password"}
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +46,7 @@ def test_option_set_types_and_defaults(schema):
 def test_account_template_fields(schema):
     template = schema["accounts"]["templates"]["account"]
     assert set(template["items"]) == ACCOUNT_FIELDS
-    assert template["display_item"] == "name"
+    assert template["display_item"] == "label"
     for name, item in template["items"].items():
         _assert_displayable(name, item)
         assert item["type"] == "string"

@@ -99,7 +99,7 @@ Zlibrary Assistant добавляет в AstrBot поиск и загрузку 
 | Параметр | Тип | По умолчанию | Описание |
 |----------|-----|--------------|----------|
 | `accounts` | template_list | `[]` | Пул аккаунтов, одна запись на аккаунт; если заданы и remix, и почта с паролем, приоритет у remix |
-| `accounts[].name` | string | `account` | Имя аккаунта для журнала и состояния |
+| `accounts[].label` | string | `account` | Имя аккаунта для журнала и состояния |
 | `accounts[].remix_userid` | string | `""` | remix_userid (рекомендуется, в паре с remix_userkey) |
 | `accounts[].remix_userkey` | string | `""` | remix_userkey (рекомендуется) |
 | `accounts[].email` | string | `""` | Почта аккаунта (запасной вариант, в паре с паролем) |
@@ -128,7 +128,7 @@ Zlibrary Assistant добавляет в AstrBot поиск и загрузку 
 ```json
 {
   "accounts": [
-    {"name": "account1", "remix_userid": "", "remix_userkey": "", "email": "", "password": ""}
+    {"label": "account1", "remix_userid": "", "remix_userkey": "", "email": "", "password": ""}
   ],
   "domains": [],
   "proxy": "",

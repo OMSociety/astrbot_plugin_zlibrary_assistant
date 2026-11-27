@@ -7,9 +7,9 @@
       "account": {
         "name": "账号",
         "hint": "每个账号每日有独立的下载额度，多账号可提高每日总下载次数",
-        "display_item": "name",
+        "display_item": "label",
         "items": {
-          "name": {
+          "label": {
             "description": "账号备注名",
             "type": "string",
             "default": "account",

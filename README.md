@@ -101,7 +101,7 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `accounts` | template_list | `[]` | 账号池，每项一个账号；remix 与邮箱密码同时填写时以 remix 为准 |
-| `accounts[].name` | string | `account` | 账号备注名，用于日志与状态显示 |
+| `accounts[].label` | string | `account` | 账号备注名，用于日志与状态显示 |
 | `accounts[].remix_userid` | string | `""` | remix_userid（推荐，与 remix_userkey 成对） |
 | `accounts[].remix_userkey` | string | `""` | remix_userkey（推荐） |
 | `accounts[].email` | string | `""` | 账号邮箱（备选，与密码成对） |
@@ -130,7 +130,7 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 ```json
 {
   "accounts": [
-    {"name": "account1", "remix_userid": "", "remix_userkey": "", "email": "", "password": ""}
+    {"label": "account1", "remix_userid": "", "remix_userkey": "", "email": "", "password": ""}
   ],
   "domains": [],
   "proxy": "",

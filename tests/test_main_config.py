@@ -15,7 +15,7 @@ class TestParseAccounts:
     def test_empty_config_gives_no_accounts(self, config):
         assert plugin_main.parse_accounts(config) == []
 
-    @pytest.mark.parametrize("raw", ["x", 5, {"name": "a"}, ("a",)])
+    @pytest.mark.parametrize("raw", ["x", 5, {"label": "a"}, ("a",)])
     def test_non_list_value_ignored(self, raw):
         assert plugin_main.parse_accounts({"accounts": raw}) == []
 
@@ -24,7 +24,7 @@ class TestParseAccounts:
             {
                 "accounts": [
                     {
-                        "name": "main",
+                        "label": "main",
                         "email": " a@b.c ",
                         "password": " pw ",
                         "remix_userid": " 12 ",
@@ -43,7 +43,7 @@ class TestParseAccounts:
         assert acc.downloads_today == 0
 
     def test_missing_fields_default_to_empty_without_credentials(self):
-        (acc,) = plugin_main.parse_accounts({"accounts": [{"name": "x"}]})
+        (acc,) = plugin_main.parse_accounts({"accounts": [{"label": "x"}]})
         assert (acc.email, acc.password, acc.remix_userid, acc.remix_userkey) == (
             "",
             "",
@@ -58,7 +58,7 @@ class TestParseAccounts:
             {
                 "accounts": [
                     {
-                        "name": None,
+                        "label": None,
                         "email": None,
                         "password": None,
                         "remix_userid": None,
@@ -77,7 +77,7 @@ class TestParseAccounts:
 
     def test_unnamed_accounts_numbered_by_position(self):
         accounts = plugin_main.parse_accounts(
-            {"accounts": [{"name": ""}, {}, {"name": "named"}, {}]}
+            {"accounts": [{"label": ""}, {}, {"label": "named"}, {}]}
         )
         assert [a.name for a in accounts] == ["账号1", "账号2", "named", "账号4"]
 
@@ -86,13 +86,13 @@ class TestParseAccounts:
         assert [a.name for a in accounts] == ["账号2", "账号4"]
 
     def test_duplicate_entries_are_kept_as_separate_accounts(self):
-        entry = {"name": "dup", "remix_userid": "1", "remix_userkey": "k"}
+        entry = {"label": "dup", "remix_userid": "1", "remix_userkey": "k"}
         accounts = plugin_main.parse_accounts({"accounts": [entry, dict(entry)]})
         assert len(accounts) == 2
         assert accounts[0] is not accounts[1]
 
     def test_numeric_name_coerced_to_string(self):
-        (acc,) = plugin_main.parse_accounts({"accounts": [{"name": 7}]})
+        (acc,) = plugin_main.parse_accounts({"accounts": [{"label": 7}]})
         assert acc.name == "7"
 
 

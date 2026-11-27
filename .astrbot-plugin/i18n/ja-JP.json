@@ -1,13 +1,17 @@
 {
   "metadata": {
     "display_name": "Zlibrary アシスタント",
-    "desc": "AstrBot 向けの Z-Library 書籍検索・ダウンロード：ミラー自動フェイルオーバー、/zlib コマンド、カード画像表示、アカウントプールの割当管理"
+    "desc": "AstrBot 向けの Z-Library 書籍検索・ダウンロード：ミラー自動フェイルオーバー、/zlib コマンド、カード画像表示、アカウントプールの自動選択"
   },
   "config": {
     "accounts": {
       "templates": {
         "account": {
           "name": "アカウント",
+          "label": {
+            "description": "アカウント名",
+            "hint": "ログと状態表示にのみ使います。例: account1"
+          },
           "hint": "アカウントごとに 1 日のダウンロード枠があり、複数登録で合計が増えます",
           "remix_userid": {
             "description": "remix_userid（推奨）",

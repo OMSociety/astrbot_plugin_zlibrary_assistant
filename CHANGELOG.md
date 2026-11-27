@@ -10,7 +10,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-11-27
 
 ### 新增
 
@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 移除
 
 - 配置项 `domain` 由 `domains` 取代；默认域名改为内置的官方入口与镜像列表。升级后请重新核对配置。
+- 账号项的备注名字段由 `name` 改名为 `label`：该项原与模板名共用同一个 i18n 键，导致备注名无法随语言本地化。升级后账号需要重新填写备注名，remix 与邮箱密码字段不受影响。
 
 ### Added
 
@@ -59,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - The `domain` option is replaced by `domains`; the default domains are now the built-in official entries and mirror list. Re-check your configuration after upgrading.
+- The account label field is renamed from `name` to `label`: it shared an i18n key with the template name, so the label could not be localized. Re-enter the account labels after upgrading; remix and email/password fields are unaffected.
 
 ## [1.1.2] - 2026-11-16
 

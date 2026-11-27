@@ -1,13 +1,17 @@
 {
   "metadata": {
     "display_name": "Zlibrary Assistant",
-    "desc": "Z-Library book search and download for AstrBot: automatic mirror failover, /zlib commands, card-image results, and an account pool with quota control"
+    "desc": "Z-Library book search and download for AstrBot: automatic mirror failover, /zlib commands, card-image results, and an account pool that picks the freest account"
   },
   "config": {
     "accounts": {
       "templates": {
         "account": {
           "name": "Account",
+          "label": {
+            "description": "Account label",
+            "hint": "Shown in logs and status only, e.g. account1"
+          },
           "hint": "Each account has its own daily download quota; more accounts raise the daily total",
           "remix_userid": {
             "description": "remix_userid (recommended)",

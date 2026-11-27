@@ -66,7 +66,7 @@ def parse_accounts(config: AstrBotConfig) -> list[Account]:
             continue
         accounts.append(
             Account(
-                name=str(item.get("name") or f"账号{i}"),
+                name=str(item.get("label") or f"账号{i}"),
                 email=str(item.get("email") or "").strip(),
                 password=str(item.get("password") or ""),
                 remix_userid=str(item.get("remix_userid") or "").strip(),

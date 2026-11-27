@@ -99,7 +99,7 @@ Fence markers are stripped from book fields and the fields are truncated before 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `accounts` | template_list | `[]` | Account pool, one entry per account; when both remix and email/password are set, remix wins |
-| `accounts[].name` | string | `account` | Account label for logs and status |
+| `accounts[].label` | string | `account` | Account label for logs and status |
 | `accounts[].remix_userid` | string | `""` | remix_userid (recommended, paired with remix_userkey) |
 | `accounts[].remix_userkey` | string | `""` | remix_userkey (recommended) |
 | `accounts[].email` | string | `""` | Account email (fallback, paired with the password) |
@@ -128,7 +128,7 @@ Fence markers are stripped from book fields and the fields are truncated before 
 ```json
 {
   "accounts": [
-    {"name": "account1", "remix_userid": "", "remix_userkey": "", "email": "", "password": ""}
+    {"label": "account1", "remix_userid": "", "remix_userkey": "", "email": "", "password": ""}
   ],
   "domains": [],
   "proxy": "",

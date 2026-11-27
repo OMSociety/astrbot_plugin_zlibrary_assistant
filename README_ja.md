@@ -99,7 +99,7 @@ AstrBot WebUI のプラグインマーケットで「Zlibrary助手」を検索�
 | 設定 | 型 | 既定値 | 説明 |
 |------|----|--------|------|
 | `accounts` | template_list | `[]` | アカウントプール（1 項目に 1 アカウント）。remix とメール/パスワードを両方入力した場合は remix が優先されます |
-| `accounts[].name` | string | `account` | ログと状態表示に使うアカウント名 |
+| `accounts[].label` | string | `account` | ログと状態表示に使うアカウント名 |
 | `accounts[].remix_userid` | string | `""` | remix_userid（推奨。remix_userkey とセット） |
 | `accounts[].remix_userkey` | string | `""` | remix_userkey（推奨） |
 | `accounts[].email` | string | `""` | アカウントのメール（代替。パスワードとセット） |
@@ -128,7 +128,7 @@ AstrBot WebUI のプラグインマーケットで「Zlibrary助手」を検索�
 ```json
 {
   "accounts": [
-    {"name": "account1", "remix_userid": "", "remix_userkey": "", "email": "", "password": ""}
+    {"label": "account1", "remix_userid": "", "remix_userkey": "", "email": "", "password": ""}
   ],
   "domains": [],
   "proxy": "",

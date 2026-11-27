@@ -1,13 +1,17 @@
 {
   "metadata": {
     "display_name": "Zlibrary助手",
-    "desc": "为 AstrBot 提供 Z-Library 图书搜索与下载：多镜像自动故障转移、/zlib 指令、卡片图片结果、账号池额度管控"
+    "desc": "为 AstrBot 提供 Z-Library 图书搜索与下载：多镜像自动故障转移、/zlib 指令、卡片图片结果、账号池自动选号"
   },
   "config": {
     "accounts": {
       "templates": {
         "account": {
           "name": "账号",
+          "label": {
+            "description": "账号备注名",
+            "hint": "仅用于日志与状态显示，如 account1"
+          },
           "hint": "每个账号每日有独立的下载额度，多账号可提高每日总下载次数",
           "remix_userid": {
             "description": "remix_userid（推荐）",
