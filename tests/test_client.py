@@ -6,6 +6,7 @@ ZlibTransport.guarded_get；不发起任何真实网络请求。
 
 from __future__ import annotations
 
+import asyncio
 import io
 import types
 
@@ -34,6 +35,8 @@ from astrbot_plugin_zlibrary_assistant.zlib_client import (
     EP_PROFILE,
     EP_SEARCH,
     LOGIN_RETRY_COOLDOWN,
+    PROBE_MIN_INTERVAL,
+    PROBE_TTL,
     ZlibClient,
     _classify_business_error,
     mask_proxy,
@@ -956,6 +959,123 @@ class TestStatusAndDiagnose:
 
 
 # ---------- 凭据不外泄 ----------
+
+
+class TestSharedProbe:
+    """冷启动时由第一个调用方探测整个域名池，结果全局共享。"""
+
+    @staticmethod
+    def probe_count(api):
+        return sum(1 for c in api.calls if c["path"] == EP_SEARCH)
+
+    @pytest.fixture
+    def pool_clock(self, clock):
+        # 域名池自带时钟（zlib_domains.time），与 zlib_client 的时钟分开注入
+        return clock
+
+    @pytest.mark.asyncio
+    async def test_cold_pool_is_probed_once_then_served_from_state(
+        self, make_client, pool_clock
+    ):
+        api = FakeApi().on("POST", EP_SEARCH, lambda c: ok(books=[]))
+        client = make_client(api=api)
+        client.domains._clock = pool_clock
+        await client.ensure_probed()
+        assert self.probe_count(api) == len(BUILTIN)
+        assert client.domains.has_recent_ok(PROBE_TTL)
+        await client.ensure_probed()
+        assert self.probe_count(api) == len(BUILTIN)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_callers_share_a_single_probe(
+        self, make_client, pool_clock
+    ):
+        api = FakeApi().on("POST", EP_SEARCH, lambda c: ok(books=[]))
+        client = make_client(api=api)
+        client.domains._clock = pool_clock
+        await asyncio.gather(*(client.ensure_probed() for _ in range(5)))
+        assert self.probe_count(api) == len(BUILTIN)
+
+    @pytest.mark.asyncio
+    async def test_stale_pool_is_probed_again(self, make_client, pool_clock):
+        api = FakeApi().on("POST", EP_SEARCH, lambda c: ok(books=[]))
+        client = make_client(api=api)
+        client.domains._clock = pool_clock
+        await client.ensure_probed()
+        pool_clock.now += PROBE_TTL + 1
+        await client.ensure_probed()
+        assert self.probe_count(api) == 2 * len(BUILTIN)
+
+    @pytest.mark.asyncio
+    async def test_unreachable_pool_is_not_reprobed_within_min_interval(
+        self, make_client, pool_clock
+    ):
+        api = FakeApi().on(
+            "POST", EP_SEARCH, lambda c: ZlibError("network_error", "down")
+        )
+        client = make_client(api=api)
+        client.domains._clock = pool_clock
+        await client.ensure_probed()
+        await client.ensure_probed()
+        assert self.probe_count(api) == len(BUILTIN)
+        pool_clock.now += PROBE_MIN_INTERVAL + 1
+        await client.ensure_probed()
+        assert self.probe_count(api) == 2 * len(BUILTIN)
+
+    @pytest.mark.asyncio
+    async def test_probe_survives_a_cancelled_caller(self, make_client, pool_clock):
+        client = make_client()
+        client.domains._clock = pool_clock
+        gate = asyncio.Event()
+
+        async def slow_probe(base_url):
+            await gate.wait()
+
+        client._probe_domain = slow_probe
+        caller = asyncio.create_task(client.ensure_probed())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        gate.set()
+        await client._probe_task
+        assert not client._probe_task.cancelled()
+        assert client.domains.has_recent_ok(PROBE_TTL)
+
+    @pytest.mark.asyncio
+    async def test_slow_mirror_counts_as_network_error(
+        self, make_client, pool_clock, monkeypatch
+    ):
+        client = make_client()
+        client.domains._clock = pool_clock
+
+        async def hang(*args, **kwargs):
+            await asyncio.sleep(30)
+
+        monkeypatch.setattr(client.transport, "request_json", hang)
+        monkeypatch.setattr(zlib_client, "PROBE_TIMEOUT", 0.01)
+        await client.ensure_probed()
+        rows = client.domains.snapshot()
+        assert {r["last_category"] for r in rows} == {"network_error"}
+        assert all(r["cooling"] for r in rows)
+
+    @pytest.mark.asyncio
+    async def test_close_cancels_an_inflight_probe(self, make_client, pool_clock):
+        client = make_client()
+        client.domains._clock = pool_clock
+        gate = asyncio.Event()
+
+        async def slow_probe(base_url):
+            await gate.wait()
+
+        client._probe_domain = slow_probe
+        caller = asyncio.create_task(client.ensure_probed())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        await client.close()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
 
 
 class TestNoCredentialLeak:

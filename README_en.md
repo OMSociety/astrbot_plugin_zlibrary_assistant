@@ -85,6 +85,7 @@ Fence markers are stripped from book fields and the fields are truncated before 
 ## Mirrors and failover
 
 - Built-in domains are tried in this order initially, then re-ranked automatically by observed results (recently working ones first, lower latency preferred): the official entries `z-library.sk`, `z-lib.sk`, `z-library.im`, `z-library.hn` first, then the mirrors `z-lib.by`, `z-library.website`, `z-lib.gd`, `z-lib.gl`, `article.sk`, `articles.sk`, `z-library.qa`, `zlib.bz`.
+- When the domain pool has no recently working mirror (just started, or idle for a while), the first search probes every mirror concurrently (at most 10 seconds each) and writes the result into the pool, shared by all sessions; searches that arrive during the probe share that single probe, and when no mirror is reachable the next probe waits at least 60 seconds. Background warm-up probes once as well.
 - Requests carry the `source: android` header to the mirrors' E-API. Network errors, certificate errors, browser-verification blocks, Cloudflare blocks and rate limiting trigger failover and put that mirror on a cooldown that depends on the error type.
 - Domains in `domains` have the highest priority, followed by the built-in mirrors; domains learned from a mirror come last and serve only requests without account credentials.
 - Whether a mirror is reachable depends on your egress network; rely on the result of `/zlib diag`.

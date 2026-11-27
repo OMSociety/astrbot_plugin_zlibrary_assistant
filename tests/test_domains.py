@@ -146,6 +146,27 @@ class TestRanking:
         assert row["ok_count"] == 2
 
 
+class TestRecentOk:
+    def test_false_until_some_domain_succeeds(self):
+        pool = make_pool()
+        assert pool.has_recent_ok(300) is False
+        pool.mark_ok(pool.primary, 0.2)
+        assert pool.has_recent_ok(300) is True
+
+    def test_expires_after_ttl(self):
+        pool = make_pool()
+        pool.mark_ok(pool.primary, 0.2)
+        pool.clock.now += 301
+        assert pool.has_recent_ok(300) is False
+
+    def test_failure_clears_the_record(self):
+        pool = make_pool()
+        base = pool.primary
+        pool.mark_ok(base, 0.2)
+        pool.mark_failed(base, "network_error")
+        assert pool.has_recent_ok(300) is False
+
+
 class TestCooldown:
     @pytest.mark.parametrize("category", sorted(COOLDOWN_SECONDS))
     def test_failed_domain_skipped_during_cooldown(self, category):

@@ -135,6 +135,7 @@ class ZLibraryAssistantPlugin(Star):
             if delay:
                 await asyncio.sleep(delay)
             try:
+                await self.client.ensure_probed()
                 await self.client.discover_domains()
                 await self.client.ensure_login()
                 return

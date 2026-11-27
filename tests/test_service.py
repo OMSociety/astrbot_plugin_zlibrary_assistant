@@ -48,6 +48,26 @@ class TestSearch:
         ]
 
     @pytest.mark.asyncio
+    async def test_every_search_ensures_the_mirror_pool_is_probed_first(
+        self, make_service
+    ):
+        svc, client = make_service()
+        order = []
+        real_search = client.search
+
+        async def probed():
+            order.append("probe")
+
+        async def searched(query, **kw):
+            order.append("search")
+            return await real_search(query, **kw)
+
+        client.ensure_probed = probed
+        client.search = searched
+        await svc.search("u1", "x")
+        assert order == ["probe", "search"]
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("given", "used"), [(0, 5), (-3, 1), (99, MAX_SEARCH_LIMIT)]
     )

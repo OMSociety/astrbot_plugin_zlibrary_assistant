@@ -258,6 +258,10 @@ class FakeClient:
         self.cover_calls = []
         self.download_result = None
         self.download_error = None
+        self.probe_calls = 0
+
+    async def ensure_probed(self):
+        self.probe_calls += 1
 
     async def search(self, query, *, limit, page, language, extension):
         self.search_calls.append(

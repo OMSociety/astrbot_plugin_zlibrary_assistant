@@ -84,6 +84,27 @@ async def run(agen):
     return [r async for r in agen]
 
 
+class TestWarmup:
+    @pytest.mark.asyncio
+    async def test_warmup_probes_the_pool_before_discovery_and_login(self):
+        order = []
+
+        class Client:
+            async def ensure_probed(self):
+                order.append("probe")
+
+            async def discover_domains(self):
+                order.append("discover")
+
+            async def ensure_login(self):
+                order.append("login")
+
+        plugin = make_plugin()
+        plugin.client = Client()
+        await plugin._warmup()
+        assert order == ["probe", "discover", "login"]
+
+
 class TestDetail:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

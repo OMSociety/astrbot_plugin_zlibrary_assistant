@@ -179,6 +179,11 @@ class DomainPool:
         soonest = sorted(pool, key=lambda s: s.cooldown_until)
         return [s.base_url for s in soonest[: self.max_attempts]]
 
+    def has_recent_ok(self, ttl: float) -> bool:
+        """池里是否有 ttl 秒内成功过的域名（探测或真实请求都算）。"""
+        now = self._clock()
+        return any(s.last_ok and now - s.last_ok <= ttl for s in self._states.values())
+
     @property
     def primary(self) -> str:
         return self.candidates()[0]

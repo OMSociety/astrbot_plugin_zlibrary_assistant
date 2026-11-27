@@ -43,6 +43,14 @@ EP_DOMAINS = "/eapi/info/domains"
 # 同一账号两次登录尝试之间的最短间隔：凭据错误时避免每次请求都去撞登录端点
 LOGIN_RETRY_COOLDOWN = 60.0
 
+# 共享探测：域名池里没有 PROBE_TTL 秒内成功过的域名时，由第一个调用方触发一次
+# 全池并发探测，结果写回域名池，所有会话共用；两次探测至少间隔 PROBE_MIN_INTERVAL
+# 秒，镜像全部不可达时不会被每次搜索反复触发
+PROBE_TTL = 300.0
+PROBE_MIN_INTERVAL = 60.0
+PROBE_CONCURRENCY = 12
+PROBE_TIMEOUT = 10.0
+
 _AUTH_KEYWORDS = ("login", "password", "authoriz", "unauthor", "credential")
 _QUOTA_KEYWORDS = ("limit", "daily", "quota", "exceed")
 
@@ -113,8 +121,12 @@ class ZlibClient:
         self.book_cache = BookCache(cache_path)
         self._login_lock = asyncio.Lock()
         self._last_login_attempt: dict[str, float] = {}
+        self._probe_task: asyncio.Task | None = None
+        self._last_probe_at = float("-inf")
 
     async def close(self) -> None:
+        if self._probe_task is not None and not self._probe_task.done():
+            self._probe_task.cancel()
         self.book_cache.flush()
         await self.transport.close()
 
@@ -544,10 +556,10 @@ class ZlibClient:
             for a in self.accounts
         ]
 
-    async def diagnose(self) -> Diagnosis:
-        """并发探测全部镜像域名（各发一次最小搜索），并刷新账号状态。"""
+    async def _probe_domain(self, base_url: str) -> None:
+        """对单个镜像发一次最小搜索；超过 PROBE_TIMEOUT 按网络错误计。"""
 
-        async def probe(base_url: str) -> None:
+        async def request() -> None:
             status, resp = await self.transport.request_json(
                 base_url,
                 "POST",
@@ -557,7 +569,47 @@ class ZlibClient:
             if not _is_success(resp):
                 raise _classify_business_error(status, resp, "探测")
 
-        reports = await self.domains.probe_all(probe)
+        try:
+            await asyncio.wait_for(request(), PROBE_TIMEOUT)
+        except asyncio.TimeoutError as e:
+            raise ZlibError(
+                "network_error", f"探测超过 {PROBE_TIMEOUT:.0f} 秒未响应"
+            ) from e
+
+    async def _probe_pool(self) -> None:
+        try:
+            await self.domains.probe_all(
+                self._probe_domain, concurrency=PROBE_CONCURRENCY
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - 探测失败不应影响调用方
+            logger.warning(f"镜像探测失败: {e}")
+
+    async def ensure_probed(self) -> None:
+        """保证域名池有近期可用的镜像记录；探测结果全局共享。
+
+        并发调用共用同一个进行中的探测任务；调用方被取消（如搜索超时）时探测
+        继续跑完，结果留给后续请求。
+        """
+        if self.domains.has_recent_ok(PROBE_TTL):
+            return
+        task = self._probe_task
+        if task is None or task.done():
+            now = time.monotonic()
+            if now - self._last_probe_at < PROBE_MIN_INTERVAL:
+                return
+            self._last_probe_at = now
+            task = self._probe_task = asyncio.create_task(self._probe_pool())
+        await asyncio.shield(task)
+
+    async def diagnose(self) -> Diagnosis:
+        """并发探测全部镜像域名（各发一次最小搜索），并刷新账号状态。"""
+
+        self._last_probe_at = time.monotonic()
+        reports = await self.domains.probe_all(
+            self._probe_domain, concurrency=PROBE_CONCURRENCY
+        )
         await self.ensure_login(force=True)
         return Diagnosis(
             domains=reports,

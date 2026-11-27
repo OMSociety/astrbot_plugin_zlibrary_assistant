@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 新增
 
 - **配置项 `search_timeout`**：搜索、翻页与额度查询的超时（秒），默认 30，范围 5-300；LLM 工具与 `/zlib` 指令共用。
+- **镜像共享探测**：域名池没有 300 秒内成功过的镜像时，第一次搜索前并发探测全部镜像（单个最多 10 秒），结果写入域名池，所有会话共用；并发搜索共用同一次探测，镜像全部不可达时两次探测至少间隔 60 秒，后台预热也先探测一次。
 
 ### 变更
 
@@ -28,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`search_timeout` option**: timeout in seconds for search, paging and quota checks; default 30, range 5-300; shared by the LLM tools and the `/zlib` commands.
+- **Shared mirror probe**: when no mirror has succeeded within the last 300 seconds, the first search probes every mirror concurrently (at most 10 seconds each) and writes the result into the domain pool, shared by all sessions; concurrent searches share one probe, and when no mirror is reachable probes are at least 60 seconds apart; background warm-up probes first as well.
 
 ### Changed
 

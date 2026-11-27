@@ -90,6 +90,7 @@ class ZlibService:
         extension: str = "",
     ) -> SearchOutcome:
         limit = max(1, min(int(limit or self.search_limit), MAX_SEARCH_LIMIT))
+        await self.client.ensure_probed()
         result = await self.client.search(
             query, limit=limit, page=page, language=language, extension=extension
         )
