@@ -50,6 +50,10 @@
       "description": "Default number of search results",
       "hint": "Range 1-10; larger values are capped to keep the card image short"
     },
+    "search_timeout": {
+      "description": "Search and paging timeout (seconds)",
+      "hint": "Switching mirrors one by one is slow when they are flaky; a hint is sent on timeout. Range 5-300; raise it on poor networks or behind a proxy"
+    },
     "card_enabled": {
       "description": "Show search results as a card image",
       "hint": "When off, replies are plain-text lists; plain text is also used automatically if the renderer is unavailable"

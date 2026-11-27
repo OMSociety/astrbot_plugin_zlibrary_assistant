@@ -18,8 +18,14 @@ from stubs import (
     profile,
 )
 
-from astrbot_plugin_zlibrary_assistant.tools import search_tool, status_tool
-from astrbot_plugin_zlibrary_assistant.tools.common import is_admin_context, session_key
+from astrbot_plugin_zlibrary_assistant.tools.common import (
+    DEFAULT_DEADLINE,
+    MAX_DEADLINE,
+    MIN_DEADLINE,
+    clamp_deadline,
+    is_admin_context,
+    session_key,
+)
 from astrbot_plugin_zlibrary_assistant.tools.download_tool import ZlibDownloadBookTool
 from astrbot_plugin_zlibrary_assistant.tools.search_tool import ZlibSearchBooksTool
 from astrbot_plugin_zlibrary_assistant.tools.status_tool import (
@@ -169,10 +175,37 @@ class TestStatusTool:
             await asyncio.sleep(5)
 
         monkeypatch.setattr(client, "ensure_login", hang)
-        monkeypatch.setattr(status_tool, "TOOL_DEADLINE", 0.01)
-        text = text_of(await ZlibGetStatusTool(client=client).call(ctx(admin=True)))
+        tool = ZlibGetStatusTool(client=client, deadline=0.01)
+        text = text_of(await tool.call(ctx(admin=True)))
         assert text.startswith("登录检查超时")
         assert "r（remix）" in text
+
+
+# ---------- 超时配置 ----------
+
+
+class TestDeadline:
+    def test_default_is_thirty_seconds(self):
+        assert DEFAULT_DEADLINE == 30.0
+        assert ZlibSearchBooksTool().deadline == 30.0
+        assert ZlibGetStatusTool().deadline == 30.0
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (None, DEFAULT_DEADLINE),
+            ("", DEFAULT_DEADLINE),
+            ("abc", DEFAULT_DEADLINE),
+            (float("nan"), DEFAULT_DEADLINE),
+            (45, 45.0),
+            ("60", 60.0),
+            (1, MIN_DEADLINE),
+            (-3, MIN_DEADLINE),
+            (9999, MAX_DEADLINE),
+        ],
+    )
+    def test_clamp_deadline(self, raw, expected):
+        assert clamp_deadline(raw) == expected
 
 
 # ---------- 搜索工具 ----------
@@ -180,8 +213,8 @@ class TestStatusTool:
 
 class TestSearchTool:
     @staticmethod
-    def _tool(service):
-        return ZlibSearchBooksTool(service=service)
+    def _tool(service, **kwargs):
+        return ZlibSearchBooksTool(service=service, **kwargs)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("query", [None, "", "   "])
@@ -214,14 +247,14 @@ class TestSearchTool:
         assert text == "未在 Z-Library 找到与「冷门书」相关的图书，可以换个关键词试试。"
 
     @pytest.mark.asyncio
-    async def test_timeout_returns_fixed_phrase(self, service, monkeypatch):
+    async def test_timeout_returns_fixed_phrase(self, service):
         async def hang(*a, **k):
             await asyncio.sleep(5)
 
         service.client.search = hang
-        monkeypatch.setattr(search_tool, "TOOL_DEADLINE", 0.01)
-        text = await self._tool(service).call(ctx(), query="x")
+        text = await self._tool(service, deadline=0.6).call(ctx(), query="x")
         assert text.startswith("搜索超时")
+        assert "镜像在 1 秒内" in text
         assert "不要凭猜测回答用户" in text
 
     @pytest.mark.asyncio

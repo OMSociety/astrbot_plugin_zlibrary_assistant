@@ -17,7 +17,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 from astrbot.core.message.components import File, Image
 
-from .tools.common import TOOL_DEADLINE
+from .tools.common import clamp_deadline
 from .tools.download_tool import ZlibDownloadBookTool
 from .tools.search_tool import ZlibSearchBooksTool
 from .tools.status_tool import ZlibGetStatusTool
@@ -47,9 +47,6 @@ _SUB_PREV = {"上一页", "上页", "prev", "p"}
 _SUB_STATUS = {"状态", "status"}
 _SUB_DIAG = {"诊断", "diag"}
 _SUB_HELP = {"帮助", "help"}
-
-# `/zlib 3` 这种「组名 + 序号」的简写：等价于 `/zlib 下载 3`
-_BARE_REF_REGEX = r"^/?zl(?:ib)?\s+\d+\s*$"
 
 # 后台预热的重试节奏：网络刚起来时首次探测常失败，有限次重试避免永久停在未就绪
 _WARMUP_DELAYS = (0, 10, 20, 30, 45, 60)
@@ -109,13 +106,14 @@ class ZLibraryAssistantPlugin(Star):
             command_prefix=COMMAND_PREFIX,
         )
         self.download_admin_only = bool(config.get("download_admin_only", False))
+        self.search_timeout = clamp_deadline(config.get("search_timeout"))
         self._warmup_task: asyncio.Task | None = None
         self.context.add_llm_tools(
-            ZlibSearchBooksTool(service=self.service),
+            ZlibSearchBooksTool(service=self.service, deadline=self.search_timeout),
             ZlibDownloadBookTool(
                 service=self.service, admin_only=self.download_admin_only
             ),
-            ZlibGetStatusTool(client=self.client),
+            ZlibGetStatusTool(client=self.client, deadline=self.search_timeout),
         )
         logger.info("ZLibrary Assistant 已加载：/zlib 指令组与 3 个 LLM 工具")
 
@@ -219,11 +217,11 @@ class ZLibraryAssistantPlugin(Star):
 
     async def _search_reply(self, event: AstrMessageEvent, pending):
         try:
-            outcome = await asyncio.wait_for(pending, TOOL_DEADLINE)
+            outcome = await asyncio.wait_for(pending, self.search_timeout)
         except asyncio.TimeoutError:
             yield event.plain_result(
-                f"搜索超时：镜像在 {TOOL_DEADLINE:.0f} 秒内没有返回结果，"
-                "稍后重试或换个关键词。"
+                f"搜索超时：镜像在 {self.search_timeout:.0f} 秒内没有返回结果，"
+                "稍后重试、换个关键词，或在插件配置里调大 search_timeout。"
             )
             return
         except ZlibError as e:
@@ -256,14 +254,6 @@ class ZLibraryAssistantPlugin(Star):
         ):
             yield r
 
-    @filter.regex(_BARE_REF_REGEX)
-    async def cmd_bare_ref(self, event: AstrMessageEvent):
-        """`/zlib 3` 简写：等价于 `/zlib 下载 3`"""
-        ref = (event.message_str or "").strip().rsplit(maxsplit=1)[-1]
-        async for r in self._download_reply(event, ref):
-            yield r
-        event.stop_event()
-
     async def _download_reply(self, event: AstrMessageEvent, ref: str):
         if self.download_admin_only and not event.is_admin():
             yield event.plain_result("下载仅管理员可用。")
@@ -295,7 +285,7 @@ class ZLibraryAssistantPlugin(Star):
             return
         note = ""
         try:
-            await asyncio.wait_for(self.client.ensure_login(), TOOL_DEADLINE)
+            await asyncio.wait_for(self.client.ensure_login(), self.search_timeout)
         except asyncio.TimeoutError:
             note = "登录检查超时（镜像不稳），以下为本地记录的状态。\n"
         yield event.plain_result(note + format_status(self.client.account_status()))

@@ -55,7 +55,6 @@ Command group `/zlib`, alias `/zl`. The sub-commands also accept Chinese names (
 | `/zlib next` / `/zlib prev` | Page through the latest search. Aliases `n`, `p` |
 | `/zlib detail index-or-id` | Full information for one book: publisher, pages, series, categories and description. Aliases `d`, `detail` |
 | `/zlib download index-or-id` | The index refers to the latest results of the current session; a number larger than the page size is treated as a book id. Aliases `dl`, `download` |
-| `/zlib 3` | Shorthand for `/zlib download 3` (`/zl 3` works too) |
 | `/zlib status` | Account login state and today's quota (admins only) |
 | `/zlib diag` | Probes every mirror for reachability and latency and checks account logins (admins only) |
 | `/zlib help` | Command help |
@@ -118,6 +117,7 @@ Fence markers are stripped from book fields and the fields are truncated before 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `search_limit` | int | `5` | Default number of search results (1-10) |
+| `search_timeout` | int | `30` | Timeout for search, paging and quota checks (seconds, 5-300); raise it on poor networks or behind a proxy |
 | `card_enabled` | bool | `true` | Show search results as a card image; with it off, or if rendering fails, a text list is sent |
 | `download_admin_only` | bool | `false` | Only admins may download |
 
@@ -134,6 +134,7 @@ Fence markers are stripped from book fields and the fields are truncated before 
   "proxy": "",
   "max_download_mb": 80,
   "search_limit": 5,
+  "search_timeout": 30,
   "card_enabled": true,
   "download_admin_only": false
 }

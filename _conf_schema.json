@@ -68,6 +68,12 @@
     "default": 5,
     "hint": "范围 1-10，超过 10 会被限制以免卡片图片过长"
   },
+  "search_timeout": {
+    "type": "int",
+    "description": "搜索与翻页的超时（秒）",
+    "default": 30,
+    "hint": "镜像不稳时逐个换域名较慢；超时后回复一句提示。范围 5-300，网络差或走代理时可调大"
+  },
   "card_enabled": {
     "type": "bool",
     "description": "以卡片图片展示搜索结果",

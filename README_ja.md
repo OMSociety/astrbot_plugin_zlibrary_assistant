@@ -55,7 +55,6 @@ AstrBot WebUI のプラグインマーケットで「Zlibrary助手」を検索�
 | `/zlib 下一页` / `/zlib 上一页` | 直近の検索結果をページ送り。別名 `next`/`n`、`prev`/`p` |
 | `/zlib 详情 番号または id` | 1 冊の詳細（出版社、ページ数、叢書、分類、あらすじ）。別名 `detail`、`d`、`详` |
 | `/zlib 下载 番号または id` | 番号は現在のセッションの直近の結果を指します。ページ内の件数を超える数字は書籍 id として扱います。別名 `download`、`dl`、`下` |
-| `/zlib 3` | `/zlib 下载 3` の短縮形（`/zl 3` も可） |
 | `/zlib 状态` | アカウントのログイン状態と本日の残り枠（管理者のみ）。別名 `status` |
 | `/zlib 诊断` | 各ミラーの到達性と遅延を調べ、アカウントのログインを確認（管理者のみ）。別名 `diag` |
 | `/zlib 帮助` | コマンドの説明。別名 `help` |
@@ -118,6 +117,7 @@ AstrBot WebUI のプラグインマーケットで「Zlibrary助手」を検索�
 | 設定 | 型 | 既定値 | 説明 |
 |------|----|--------|------|
 | `search_limit` | int | `5` | 検索結果の既定件数（1-10） |
+| `search_timeout` | int | `30` | 検索・ページ送り・クォータ確認のタイムアウト（秒、5-300）。回線が悪い場合やプロキシ経由では大きめに |
 | `card_enabled` | bool | `true` | 検索結果をカード画像で表示。オフ、またはレンダリング失敗時はテキスト一覧を返します |
 | `download_admin_only` | bool | `false` | ダウンロードを管理者のみに限定 |
 
@@ -134,6 +134,7 @@ AstrBot WebUI のプラグインマーケットで「Zlibrary助手」を検索�
   "proxy": "",
   "max_download_mb": 80,
   "search_limit": 5,
+  "search_timeout": 30,
   "card_enabled": true,
   "download_admin_only": false
 }

@@ -16,13 +16,15 @@ from pydantic.dataclasses import dataclass
 from ..zlib_errors import ZlibError
 from ..zlib_models import book_text_lines, fenced_block
 from ..zlib_service import ZlibService
-from .common import TOOL_DEADLINE, deliver, session_key
+from .common import DEFAULT_DEADLINE, deliver, session_key
 
-# 超时后交给模型的固定短语：此时没拿到任何书目，别让模型编造结果
-TIMEOUT_TEXT = (
-    f"搜索超时：镜像在 {TOOL_DEADLINE:.0f} 秒内没有返回结果，"
-    "没有拿到任何书目。稍后再试或换个关键词，不要凭猜测回答用户。"
-)
+
+def timeout_text(deadline: float) -> str:
+    """超时后交给模型的固定短语：此时没拿到任何书目，别让模型编造结果。"""
+    return (
+        f"搜索超时：镜像在 {deadline:.0f} 秒内没有返回结果，"
+        "没有拿到任何书目。稍后再试或换个关键词，不要凭猜测回答用户。"
+    )
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -67,6 +69,7 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
         }
     )
     service: ZlibService | None = None
+    deadline: float = DEFAULT_DEADLINE
 
     async def call(
         self, context: ContextWrapper[AstrAgentContext], **kwargs: Any
@@ -87,10 +90,10 @@ class ZlibSearchBooksTool(FunctionTool[AstrAgentContext]):
                     language=str(kwargs.get("language") or ""),
                     extension=str(kwargs.get("extension") or ""),
                 ),
-                TOOL_DEADLINE,
+                self.deadline,
             )
         except asyncio.TimeoutError:
-            return TIMEOUT_TEXT
+            return timeout_text(self.deadline)
         except ZlibError as e:
             return f"搜索失败：{e.message}"
 

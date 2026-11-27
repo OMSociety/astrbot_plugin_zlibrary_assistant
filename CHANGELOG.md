@@ -10,6 +10,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-11-27
+
+### 新增
+
+- **配置项 `search_timeout`**：搜索、翻页与额度查询的超时（秒），默认 30，范围 5-300；LLM 工具与 `/zlib` 指令共用。
+
+### 变更
+
+- **搜索、翻页与额度查询的默认超时由 20 秒放宽到 30 秒**：每个不可达的镜像要耗掉约 8 秒连接超时，20 秒只够换两个域名，慢网络下搜索常在拿到结果前超时，模型随即反复重搜。
+- 超时提示按实际配置值显示秒数，指令侧的提示同时指出可调大 `search_timeout`。
+
+### 移除
+
+- **`/zlib 3` 下载简写**：下载统一用 `/zlib 下载 3`（或 `/zlib dl 3`）。裸数字不再被插件截获。
+
+### Added
+
+- **`search_timeout` option**: timeout in seconds for search, paging and quota checks; default 30, range 5-300; shared by the LLM tools and the `/zlib` commands.
+
+### Changed
+
+- **The default timeout for search, paging and quota checks is raised from 20 to 30 seconds**: every unreachable mirror burns about 8 seconds on its connect timeout, so 20 seconds only covers two domains; on a slow network searches often time out before any result arrives and the model then searches again and again.
+- The timeout message shows the configured number of seconds, and the command-side message points out that `search_timeout` can be raised.
+
+### Removed
+
+- **The `/zlib 3` download shorthand**: use `/zlib download 3` (or `/zlib dl 3`) for downloads. A bare number is no longer intercepted by the plugin.
+
 ## [1.2.0] - 2026-11-27
 
 ### 新增

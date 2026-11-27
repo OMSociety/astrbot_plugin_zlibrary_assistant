@@ -7,9 +7,23 @@ from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
 from astrbot.core.message.message_event_result import MessageChain
 
-# 单次工具调用的时限（秒）。镜像不稳时故障转移要逐个试域名，放任它跑
-# 会把整轮对话拖住几分钟，超时就先回一句「镜像不稳」让用户重试。
-TOOL_DEADLINE = 20.0
+# 搜索、翻页与额度查询的时限（秒），由配置项 search_timeout 设定。镜像不稳时
+# 故障转移要逐个试域名，放任它跑会把整轮对话拖住几分钟，超时就先回一句
+# 「镜像不稳」让用户重试；时限也不宜过短，否则慢镜像上永远拿不到结果。
+DEFAULT_DEADLINE = 30.0
+MIN_DEADLINE = 5.0
+MAX_DEADLINE = 300.0
+
+
+def clamp_deadline(value) -> float:
+    """把配置值收敛到 [MIN_DEADLINE, MAX_DEADLINE]；缺省或无法解析时用默认值。"""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_DEADLINE
+    if seconds != seconds:  # NaN
+        return DEFAULT_DEADLINE
+    return min(max(seconds, MIN_DEADLINE), MAX_DEADLINE)
 
 
 def _event(context: ContextWrapper[AstrAgentContext]):

@@ -57,7 +57,6 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 | `/zlib 下一页` / `/zlib 上一页` | 对最近一次搜索翻页。别名 `next`/`n`、`prev`/`p` |
 | `/zlib 详情 序号或id` | 看一本书的完整信息：出版社、页数、丛书、分类与简介。别名 `详`、`detail`、`d` |
 | `/zlib 下载 序号或id` | 序号取自当前会话最近一次结果；超出本页条数的数字按书籍 id 处理。别名 `下`、`download`、`dl` |
-| `/zlib 3` | 下载的简写，等价于 `/zlib 下载 3`（`/zl 3` 同样可用） |
 | `/zlib 状态` | 账号登录状态与今日额度（仅管理员）。别名 `status` |
 | `/zlib 诊断` | 探测每个镜像的可达性与延迟、检查账号登录（仅管理员）。别名 `diag` |
 | `/zlib 帮助` | 指令说明。别名 `help` |
@@ -120,6 +119,7 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `search_limit` | int | `5` | 搜索默认条数（1-10） |
+| `search_timeout` | int | `30` | 搜索、翻页与额度查询的超时（秒，5-300）；网络差或走代理时可调大 |
 | `card_enabled` | bool | `true` | 以卡片图片展示搜索结果；关闭或渲染失败时回复文本书目 |
 | `download_admin_only` | bool | `false` | 下载仅管理员可用 |
 
@@ -136,6 +136,7 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
   "proxy": "",
   "max_download_mb": 80,
   "search_limit": 5,
+  "search_timeout": 30,
   "card_enabled": true,
   "download_admin_only": false
 }

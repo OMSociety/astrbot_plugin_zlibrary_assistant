@@ -14,7 +14,7 @@ from pydantic.dataclasses import dataclass
 
 from ..zlib_client import ZlibClient
 from ..zlib_format import format_status
-from .common import TOOL_DEADLINE, is_admin_context
+from .common import DEFAULT_DEADLINE, is_admin_context
 
 # 非管理员看到的固定短语：账号状态含登录失败详情，只对管理员可见
 ADMIN_ONLY_TEXT = "账号状态仅管理员可查。"
@@ -35,6 +35,7 @@ class ZlibGetStatusTool(FunctionTool[AstrAgentContext]):
         default_factory=lambda: {"type": "object", "properties": {}}
     )
     client: ZlibClient | None = None
+    deadline: float = DEFAULT_DEADLINE
 
     async def call(
         self, context: ContextWrapper[AstrAgentContext], **kwargs: Any
@@ -45,7 +46,7 @@ class ZlibGetStatusTool(FunctionTool[AstrAgentContext]):
             return "插件未初始化，请检查插件配置"
         note = ""
         try:
-            await asyncio.wait_for(self.client.ensure_login(), TOOL_DEADLINE)
+            await asyncio.wait_for(self.client.ensure_login(), self.deadline)
         except asyncio.TimeoutError:
             note = STALE_NOTE
         return CallToolResult(

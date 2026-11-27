@@ -14,6 +14,7 @@ EXPECTED = {
     "proxy": ("string", ""),
     "max_download_mb": ("int", 80),
     "search_limit": ("int", 5),
+    "search_timeout": ("int", 30),
     "card_enabled": ("bool", True),
     "download_admin_only": ("bool", False),
 }
@@ -58,3 +59,15 @@ def test_schema_defaults_are_accepted_by_the_parsers(schema):
     config = {key: item["default"] for key, item in schema.items()}
     assert plugin_main.parse_accounts(config) == []
     assert plugin_main.parse_domains(config) == []
+
+
+def test_search_timeout_default_is_within_the_accepted_range(schema):
+    from astrbot_plugin_zlibrary_assistant.tools.common import (
+        MAX_DEADLINE,
+        MIN_DEADLINE,
+        clamp_deadline,
+    )
+
+    default = schema["search_timeout"]["default"]
+    assert MIN_DEADLINE <= default <= MAX_DEADLINE
+    assert clamp_deadline(default) == float(default)

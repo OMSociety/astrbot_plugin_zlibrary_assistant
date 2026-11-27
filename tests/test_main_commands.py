@@ -1,4 +1,4 @@
-"""main 指令入口：详情与 `/zlib 3` 简写的参数剥离、错误出口与交付方式。
+"""main 指令入口：详情与下载指令的参数剥离、错误出口与交付方式。
 
 只测指令层自身的行为（取参、出错文案、谁来发消息），搜索与下载的内部逻辑
 已由 test_service / test_client 覆盖。
@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import tempfile
 import types
 from pathlib import Path
@@ -36,7 +35,6 @@ class Event:
         self.message_str = message_str
         self.unified_msg_origin = "umo-1"
         self._admin = admin
-        self.stopped = False
 
     def plain_result(self, text: str):
         return Result("plain", text)
@@ -46,9 +44,6 @@ class Event:
 
     def is_admin(self) -> bool:
         return self._admin
-
-    def stop_event(self) -> None:
-        self.stopped = True
 
 
 class Service:
@@ -81,6 +76,7 @@ def make_plugin(service=None, *, admin_only: bool = False):
     plugin = object.__new__(plugin_main.ZLibraryAssistantPlugin)
     plugin.service = service or Service()
     plugin.download_admin_only = admin_only
+    plugin.search_timeout = 30.0
     return plugin
 
 
@@ -108,45 +104,6 @@ class TestDetail:
         assert result.payload == "序号超出范围"
 
 
-class TestBareRef:
-    @pytest.mark.asyncio
-    async def test_downloads_last_token_and_stops_the_event(self):
-        service = Service()
-        plugin = make_plugin(service)
-        event = Event("zlib 7")
-        results = await run(plugin.cmd_bare_ref(event))
-        assert service.downloaded == [BOOK]
-        assert event.stopped
-        assert any(r.kind == "chain" for r in results)
-
-    @pytest.mark.asyncio
-    async def test_admin_only_gate_applies_to_bare_ref(self):
-        service = Service()
-        plugin = make_plugin(service, admin_only=True)
-        event = Event("/zlib 7")
-        (result,) = await run(plugin.cmd_bare_ref(event))
-        assert result.payload == "下载仅管理员可用。"
-        assert service.downloaded == []
-        assert event.stopped
-
-    @pytest.mark.parametrize(
-        ("text", "matched"),
-        [
-            ("zlib 3", True),
-            ("/zlib 3", True),
-            ("zl 3", True),
-            ("/zl 12 ", True),
-            ("zlib 3 4", False),
-            ("zlib 详情 3", False),
-            ("zlib 3x", False),
-            ("zlib", False),
-            ("zlibrary 3", False),
-        ],
-    )
-    def test_regex_only_matches_a_bare_number(self, text, matched):
-        assert bool(re.search(plugin_main._BARE_REF_REGEX, text)) is matched
-
-
 class TestAdminOnly:
     @pytest.mark.asyncio
     async def test_download_command_rejects_non_admin_when_restricted(self):
@@ -172,12 +129,23 @@ class TestSearchTimeout:
             async def search(self, *_a, **_k):
                 await asyncio.sleep(5)
 
-        monkeypatch.setattr(plugin_main, "TOOL_DEADLINE", 0.01)
-        (result,) = await run(
-            make_plugin(Hanging()).cmd_search(Event("zlib 搜索 资本论"))
-        )
+        plugin = make_plugin(Hanging())
+        plugin.search_timeout = 0.01
+        (result,) = await run(plugin.cmd_search(Event("zlib 搜索 资本论")))
         assert result.kind == "plain"
         assert result.payload.startswith("搜索超时")
+
+    @pytest.mark.asyncio
+    async def test_timeout_message_reports_the_configured_seconds(self):
+        class Hanging(Service):
+            async def search(self, *_a, **_k):
+                await asyncio.sleep(5)
+
+        plugin = make_plugin(Hanging())
+        plugin.search_timeout = 0.6
+        (result,) = await run(plugin.cmd_search(Event("zlib 搜索 资本论")))
+        assert "镜像在 1 秒内" in result.payload
+        assert "search_timeout" in result.payload
 
 
 class TestHelp:
