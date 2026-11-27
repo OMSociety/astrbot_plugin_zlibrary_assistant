@@ -126,6 +126,7 @@ class DomainPool:
         self._allow_onion = allow_onion
         self.max_attempts = max_attempts
         self._states: dict[str, DomainState] = {}
+        self._probe_locks: dict[str, asyncio.Lock] = {}
         for raw in user_domains:
             if not str(raw).strip():
                 continue
@@ -227,6 +228,19 @@ class DomainPool:
         """依次对候选域名执行 op；基础设施类错误换域名重试，业务错误原样抛出。"""
         failures: list[tuple[str, ZlibError]] = []
         for base_url in self.candidates(trusted_only=trusted_only)[: self.max_attempts]:
+            state = self._states[base_url]
+            # 尚无成功记录的域名同一时刻只放一个请求去试：并发调用排队后会看到
+            # 它已进入冷却而直接跳过，避免对同一个坏域名重复等待超时
+            lock = (
+                None
+                if state.last_ok
+                else self._probe_locks.setdefault(base_url, asyncio.Lock())
+            )
+            if lock is not None:
+                await lock.acquire()
+                if state.cooldown_until > self._clock():
+                    lock.release()
+                    continue
             started = self._clock()
             try:
                 result = await op(base_url)
@@ -239,6 +253,9 @@ class DomainPool:
                 if e.category == "rate_limited":
                     await self._sleep(_RATE_LIMIT_BACKOFF)
                 continue
+            finally:
+                if lock is not None and lock.locked():
+                    lock.release()
             self.mark_ok(base_url, self._clock() - started)
             return result
         summary = "；".join(

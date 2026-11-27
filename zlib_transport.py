@@ -49,6 +49,9 @@ MAX_API_REDIRECT_HOPS = 5
 # 无限流，把插件内存吃光
 MAX_API_BYTES = 8 * 1024 * 1024
 
+# 建立 TCP 连接的超时：连不上的域名尽快判负并转移，不必等满整体超时
+CONNECT_TIMEOUT = 8.0
+
 # Set-Cookie 名称的合法字符（RFC 6265 token）：用来区分 `name=value` 与属性
 _COOKIE_NAME_RE = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
@@ -250,7 +253,9 @@ class ZlibTransport:
         if self._session is None or self._session.closed:
             async with self._session_lock:
                 if self._session is None or self._session.closed:
-                    timeout = aiohttp.ClientTimeout(total=self.timeout)
+                    timeout = aiohttp.ClientTimeout(
+                        total=self.timeout, sock_connect=CONNECT_TIMEOUT
+                    )
                     connector = None
                     if self.socks:
                         connector = ProxyConnector.from_url(

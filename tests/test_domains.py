@@ -502,3 +502,23 @@ class TestProbeAll:
 
         await pool.probe_all(probe, concurrency=3)
         assert peak <= 3
+
+
+class TestConcurrentProbe:
+    async def test_concurrent_calls_probe_bad_domain_once(self):
+        import asyncio
+
+        pool = make_pool()
+        bad = pool.candidates()[0]
+        hits: list[str] = []
+
+        async def op(base_url):
+            hits.append(base_url)
+            await asyncio.sleep(0)
+            if base_url == bad:
+                raise ZlibError("network_error", "x")
+            return base_url
+
+        results = await asyncio.gather(*(pool.call(op) for _ in range(3)))
+        assert hits.count(bad) == 1
+        assert len(set(results)) == 1 and results[0] != bad
