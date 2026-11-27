@@ -284,7 +284,7 @@ class ZLibraryAssistantPlugin(Star):
         yield event.plain_result(
             f"已发送 {done.filename}（{done.size / 1024 / 1024:.1f} MB，"
             f"耗时 {time.monotonic() - started:.1f} 秒），"
-            f"账号 {done.account_name} 今日剩余 {done.downloads_left} 次"
+            f"账号池今日剩余 {done.pool_left} 次"
         )
 
     @zlib.command("状态", alias=_SUB_STATUS)

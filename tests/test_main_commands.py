@@ -72,7 +72,7 @@ class Service:
             filename="book.pdf",
             size=2 * 1024 * 1024,
             account_name="main",
-            downloads_left=3,
+            pool_left=3,
             elapsed=1.0,
         )
 

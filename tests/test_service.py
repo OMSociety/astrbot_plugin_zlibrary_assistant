@@ -300,15 +300,21 @@ class TestDownload:
     @pytest.mark.asyncio
     async def test_streams_to_disk_and_reports_account_info(self, make_service):
         svc, client = make_service()
-        account = make_account("acc", downloads_today=4, downloads_limit=10)
+        account = make_account(
+            "acc", logged_in=True, downloads_today=4, downloads_limit=10
+        )
+        client.accounts = [
+            account,
+            make_account("idle", logged_in=True, downloads_limit=10),
+        ]
         client.download_result = (account, "My Book.pdf", b"CONTENT")
         done = await svc.download(make_book(1))
         assert done.path.read_bytes() == b"CONTENT"
-        assert (done.filename, done.size, done.account_name, done.downloads_left) == (
+        assert (done.filename, done.size, done.account_name, done.pool_left) == (
             "My Book.pdf",
             7,
             "acc",
-            6,
+            16,
         )
         assert done.path.parent.name == "books"
 

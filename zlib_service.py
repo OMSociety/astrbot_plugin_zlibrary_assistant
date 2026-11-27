@@ -54,7 +54,7 @@ class Downloaded:
     filename: str
     size: int
     account_name: str
-    downloads_left: int
+    pool_left: int  # 下载后账号池各已登录账号的剩余次数之和
     elapsed: float = 0.0
 
 
@@ -233,7 +233,7 @@ class ZlibService:
             filename=target.name,
             size=written,
             account_name=account.name,
-            downloads_left=account.downloads_left,
+            pool_left=self.pool_left(),
             elapsed=time.monotonic() - started,
         )
 
@@ -248,12 +248,15 @@ class ZlibService:
             raise ZlibError("api_error", "文件名不合法，已拒绝保存")
         return Path(out)
 
+    def pool_left(self) -> int:
+        """账号池剩余的下载次数总和；只算已登录的账号。"""
+        return sum(a.downloads_left for a in self.client.accounts if a.logged_in)
+
     def quota_hint(self) -> str:
         """给卡片页脚的额度提示；没有账号时不提额度（下载另行报错）。"""
-        rows = [a for a in self.client.accounts if a.logged_in]
-        if not rows:
+        if not any(a.logged_in for a in self.client.accounts):
             return ""
-        left = sum(a.downloads_left for a in rows)
+        left = self.pool_left()
         return f"今日剩余 {left} 次下载" if left else "今日下载额度已用完"
 
 
