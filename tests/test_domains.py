@@ -126,10 +126,22 @@ class TestRanking:
         pool.mark_ok(BUILTIN[2], 0.1)
         assert pool.candidates()[:2] == [BUILTIN[2], BUILTIN[1]]
 
-    def test_user_tier_beats_proven_builtin(self):
+    def test_proven_builtin_beats_unproven_user(self):
         pool = make_pool(["https://mine.example"])
-        pool.mark_ok(BUILTIN[0], 0.01)
+        pool.mark_ok(BUILTIN[2], 0.01)
+        assert pool.candidates()[0] == BUILTIN[2]
+
+    def test_user_tier_wins_within_same_latency_bucket(self):
+        pool = make_pool(["https://mine.example"])
+        pool.mark_ok(BUILTIN[0], 0.1)
+        pool.mark_ok("https://mine.example", 0.3)
         assert pool.candidates()[0] == "https://mine.example"
+
+    def test_failed_domain_loses_top_spot(self):
+        pool = make_pool()
+        pool.mark_ok(BUILTIN[3], 0.1)
+        pool.mark_failed(BUILTIN[3], "network_error")
+        assert pool.candidates()[0] != BUILTIN[3]
 
     def test_latency_is_smoothed(self):
         pool = make_pool()
@@ -384,8 +396,7 @@ class TestLearn:
     def test_learned_sorted_after_trusted(self):
         pool = make_pool()
         pool.learn(["fresh.example"])
-        pool.mark_ok("https://fresh.example", 0.001)
-        assert "https://fresh.example" not in pool.candidates()[:4]
+        assert pool.candidates()[-1] == "https://fresh.example"
 
     def test_private_resolution_not_checked_but_literal_internal_hosts_rejected(self):
         pool = make_pool()
@@ -504,6 +515,7 @@ class TestProbeAll:
         assert peak <= 3
 
 
+@pytest.mark.asyncio
 class TestConcurrentProbe:
     async def test_concurrent_calls_probe_bad_domain_once(self):
         import asyncio

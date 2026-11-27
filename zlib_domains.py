@@ -60,6 +60,9 @@ MAX_LEARNED = 8
 
 TIER_USER, TIER_BUILTIN, TIER_LEARNED = 0, 1, 2
 
+# 延迟排序的分档宽度（秒）
+LATENCY_BUCKET = 0.5
+
 _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$"
 )
@@ -152,9 +155,11 @@ class DomainPool:
     # ---------- 排序 ----------
 
     def _rank(self, state: DomainState):
-        proven = 0 if state.last_ok else 1
-        latency = state.latency if state.latency is not None else 1e9
-        return (state.tier, proven, latency, state.index)
+        # 近期成功过的域名置顶，按延迟分档（0.5 秒一档，抹平抖动）排序；
+        # 同档与未验证的域名再按用户 > 内置 > 学习、配置顺序排
+        if state.last_ok and state.latency is not None:
+            return (0, int(state.latency / LATENCY_BUCKET), state.tier, state.index)
+        return (1, 0, state.tier, state.index)
 
     def candidates(self, *, trusted_only: bool = False) -> list[str]:
         """按优先级排序的候选域名；全部冷却时退回"最先恢复"的几个。

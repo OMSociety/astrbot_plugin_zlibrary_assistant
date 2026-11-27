@@ -77,7 +77,7 @@ AstrBot WebUI のプラグインマーケットで「Zlibrary助手」を検索�
 
 ## ミラーとフェイルオーバー
 
-- 内蔵ドメインは順に試行します：公式エントリ `z-library.sk`、`z-lib.sk`、`z-library.im`、`z-library.hn` が先で、その後にミラー `z-lib.by`、`z-library.website`、`z-lib.gd`、`z-lib.gl`、`article.sk`、`articles.sk`、`z-library.qa`、`zlib.bz`。
+- 内蔵ドメインは最初この順に試行し、その後は実測結果で自動的に並べ替えます（最近成功したものを優先、遅延の小さい順）：公式エントリ `z-library.sk`、`z-lib.sk`、`z-library.im`、`z-library.hn` が先で、その後にミラー `z-lib.by`、`z-library.website`、`z-lib.gd`、`z-lib.gl`、`article.sk`、`articles.sk`、`z-library.qa`、`zlib.bz`。
 - ミラーの E-API へのリクエストには `source: android` ヘッダーを付けます。ネットワークエラー、証明書エラー、ブラウザ検証によるブロック、Cloudflare によるブロック、レート制限でフェイルオーバーし、そのミラーはエラーの種類に応じて冷却されます。
 - `domains` のドメインが最優先、次に内蔵ミラー。ミラーから学習したドメインは最後で、アカウント認証情報を含まないリクエストにのみ使われます。
 - ミラーに届くかどうかは、利用している出口ネットワークに依存します。`/zlib 诊断` の結果で判断してください。
