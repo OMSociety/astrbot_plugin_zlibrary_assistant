@@ -14,8 +14,6 @@
 
 </div>
 
-> This project is written by AI.
-
 Zlibrary Assistant brings Z-Library search and download to AstrBot. It carries a built-in set of mirror domains with automatic failover, works through both `/zlib` commands and LLM tools, shows search results as card images, and downloads through an account pool that rotates by remaining quota.
 
 ---
@@ -36,6 +34,14 @@ Search for "Zlibrary助手" in the AstrBot WebUI plugin market and install it.
 ```
 
 > **Note**: the official domains require browser verification that some egress IPs cannot pass, in which case the plugin switches to the built-in mirrors automatically; `/zlib diag` shows which mirrors are reachable right now.
+
+---
+
+## Preview
+
+What `/zlib search 资本论 -l zh` actually returns; the card footer shows how to ask for details, download and paging:
+
+![Search result card preview](docs/card-preview.jpg)
 
 ---
 

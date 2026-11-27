@@ -12,11 +12,9 @@
 [![Stars](https://img.shields.io/github/stars/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/stargazers)
 [![Issues](https://img.shields.io/github/issues/OMSociety/astrbot_plugin_zlibrary_assistant)](https://github.com/OMSociety/astrbot_plugin_zlibrary_assistant/issues)
 
-[快速开始](#快速开始) • [指令](#指令) • [LLM 工具](#llm-可调用工具) • [镜像域名](#镜像域名与故障转移) • [配置项](#配置项说明) • [Tor/onion](#toronion-部署) • [架构](#架构) • [常见问题](#常见问题) • [更新日志](CHANGELOG.md)
+[快速开始](#快速开始) • [效果预览](#效果预览) • [指令](#指令) • [LLM 工具](#llm-可调用工具) • [镜像域名](#镜像域名与故障转移) • [配置项](#配置项说明) • [Tor/onion](#toronion-部署) • [架构](#架构) • [常见问题](#常见问题) • [更新日志](CHANGELOG.md)
 
 </div>
-
-> 本项目由 AI 编写
 
 Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个镜像域名并自动故障转移，既可用 `/zlib` 指令也可由 LLM 工具调用；搜索结果以卡片图片展示，下载经账号池按剩余额度轮换。
 
@@ -38,6 +36,14 @@ Zlibrary 助手为 AstrBot 提供 Z-Library 图书搜索与下载：内置多个
 ```
 
 > **提示**：官方域名启用了浏览器验证，部分出口 IP 无法通过，此时插件自动转到内置镜像；`/zlib 诊断` 可查看各镜像当前是否可达。
+
+---
+
+## 效果预览
+
+`/zlib 搜索 资本论 -l zh` 的实际返回，卡片页脚给出详情、下载与翻页的写法：
+
+![搜索结果卡片预览](docs/card-preview.jpg)
 
 ---
 

@@ -1,6 +1,7 @@
 """搜索结果卡片：HTML/Jinja2 模板与渲染数据。
 
-卡片经 AstrBot 文转图渲染成一张 JPEG：
+卡片经 AstrBot 文转图渲染成一张 JPEG，视觉为构成主义风格（红、黑、米白三色，
+粗体无衬线、斜向色块、硬投影）：
 - 字体用 CSS 字体栈，由渲染端挑选可用中文字体；
 - 封面由插件端抓取后以 base64 内嵌（渲染端访问不了封面 CDN），抓取失败的书
   使用内置占位，卡片不留空；
@@ -20,17 +21,14 @@ RENDER_OPTIONS = {"full_page": True, "type": "jpeg", "quality": 90}
 # 单张卡片最多展示的书数；超出会使图片过长而被聊天平台压缩
 MAX_CARD_BOOKS = 10
 
-# 格式 -> 标签配色（背景, 文字）
+# 格式 -> 标签配色（背景, 文字），限定在红/黑/赭三色内
 _FORMAT_COLORS = {
-    "pdf": ("#fee2e2", "#b91c1c"),
-    "epub": ("#dcfce7", "#15803d"),
-    "mobi": ("#fef3c7", "#b45309"),
-    "azw3": ("#fef3c7", "#b45309"),
-    "fb2": ("#e0f2fe", "#0369a1"),
-    "djvu": ("#ede9fe", "#6d28d9"),
-    "txt": ("#f1f5f9", "#475569"),
+    "pdf": ("#d42a1e", "#f3ead7"),
+    "epub": ("#141414", "#f3ead7"),
+    "mobi": ("#c8901d", "#141414"),
+    "azw3": ("#c8901d", "#141414"),
 }
-_DEFAULT_FORMAT_COLOR = ("#e0e7ff", "#4338ca")
+_DEFAULT_FORMAT_COLOR = ("#f3ead7", "#141414")
 
 SEARCH_CARD_TMPL = """<!DOCTYPE html>
 <html lang="zh">
@@ -38,99 +36,143 @@ SEARCH_CARD_TMPL = """<!DOCTYPE html>
 <meta charset="utf-8">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html { background: #f1f5f9; }
+  html { background: #f3ead7; }
   body {
     width: 800px;
-    padding: 24px;
-    background: linear-gradient(160deg, #eef2ff 0%, #f8fafc 45%, #f1f5f9 100%) no-repeat;
-    font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", sans-serif;
-    color: #0f172a;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #f3ead7;
+    font-family: "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #141414;
+    overflow: hidden;
   }
   .head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    padding: 0 6px 16px;
+    background: #141414;
+    padding: 26px 36px 24px;
+    border-bottom: 12px solid #d42a1e;
   }
-  .head .q { font-size: 22px; font-weight: 800; letter-spacing: .5px; }
-  .head .q span { color: #4f46e5; }
-  .head .meta { font-size: 14px; color: #64748b; white-space: nowrap; margin-left: 16px; }
-  .item {
-    display: flex;
-    align-items: stretch;
-    background: #ffffff;
-    border-radius: 16px;
-    padding: 16px;
-    margin-bottom: 14px;
-    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.07);
-    border: 1px solid rgba(148, 163, 184, 0.25);
+  .head .kicker {
+    font-size: 14px; font-weight: 900; letter-spacing: 6px;
+    color: #d42a1e;
   }
-  .cover {
-    position: relative;
-    width: 96px;
-    height: 136px;
-    flex-shrink: 0;
-    border-radius: 8px;
-    overflow: hidden;
-    background: linear-gradient(135deg, #c7d2fe 0%, #e2e8f0 100%);
-    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.18);
-  }
-  .cover .ph {
-    position: absolute; inset: 0;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 40px; font-weight: 800; color: rgba(79, 70, 229, 0.55);
-  }
-  .cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  .no {
-    position: absolute; top: 0; left: 0;
-    min-width: 28px; height: 28px; padding: 0 6px;
-    display: flex; align-items: center; justify-content: center;
-    background: #4f46e5; color: #fff;
-    font-size: 15px; font-weight: 800;
-    border-bottom-right-radius: 10px;
-  }
-  .info { flex: 1; min-width: 0; margin-left: 18px; display: flex; flex-direction: column; }
-  .title {
-    font-size: 18px; font-weight: 700; line-height: 1.4; color: #0f172a;
+  .head .q {
+    margin-top: 9px;
+    font-size: 34px; font-weight: 900; line-height: 1.22;
+    color: #f3ead7; letter-spacing: 1px;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden; word-break: break-all;
   }
+  .meta {
+    position: relative;
+    align-self: flex-start;
+    margin: 22px 0 0 36px;
+    display: inline-block;
+    background: #f3ead7;
+    border: 4px solid #141414;
+    padding: 6px 16px;
+    font-size: 16px; font-weight: 900; letter-spacing: 1px;
+    box-shadow: 6px 6px 0 #d42a1e;
+  }
+  .list { padding: 26px 28px 6px; flex: 1 0 auto; }
+  .item {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    background: #fbf6ea;
+    border: 4px solid #141414;
+    margin-bottom: 20px;
+    box-shadow: 8px 8px 0 #141414;
+  }
+  .no {
+    width: 74px; flex-shrink: 0;
+    background: #d42a1e;
+    color: #f3ead7;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding-top: 12px;
+    font-size: 40px; font-weight: 900; line-height: 1;
+    border-right: 4px solid #141414;
+  }
+  .item:nth-child(even) .no { background: #141414; }
+  .cover {
+    position: relative;
+    width: 96px; height: 136px;
+    flex-shrink: 0;
+    margin: 14px 0 14px 16px;
+    border: 3px solid #141414;
+    background: #141414;
+    overflow: hidden;
+  }
+  .cover .ph {
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(135deg, transparent 0 46%, #d42a1e 46% 62%, transparent 62%),
+      #141414;
+  }
+  .cover .ph span {
+    position: absolute; left: 10px; bottom: 8px;
+    font-size: 30px; font-weight: 900; color: #f3ead7;
+  }
+  .cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .info {
+    flex: 1; min-width: 0;
+    padding: 14px 18px 14px 18px;
+    display: flex; flex-direction: column;
+  }
+  .title {
+    font-size: 21px; font-weight: 900; line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; word-break: break-all;
+  }
+  .rule { width: 56px; height: 5px; background: #d42a1e; margin: 9px 0 8px; }
   .author {
-    margin-top: 6px; font-size: 14px; color: #475569;
+    font-size: 15px; font-weight: 700;
     overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   }
   .pub {
-    margin-top: 3px; font-size: 13px; color: #94a3b8;
+    margin-top: 3px; font-size: 13px; color: #5a5348;
     overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   }
   .tags { margin-top: auto; padding-top: 10px; white-space: nowrap; }
   .tag {
     display: inline-block; margin-right: 8px;
-    padding: 3px 11px; border-radius: 999px;
-    font-size: 13px; font-weight: 600;
-    background: #f1f5f9; color: #475569;
+    padding: 3px 10px;
+    border: 2px solid #141414;
+    font-size: 13px; font-weight: 800; letter-spacing: .5px;
+    background: #f3ead7; color: #141414;
   }
-  .tag.fmt { letter-spacing: .5px; }
+  .tag.fmt { letter-spacing: 2px; }
   .foot {
-    text-align: center; padding: 6px 0 2px;
-    font-size: 14px; color: #64748b;
+    position: relative;
+    margin-top: 10px;
+    background: #141414;
+    color: #f3ead7;
+    padding: 18px 36px 18px 60px;
+    font-size: 15px; font-weight: 700; line-height: 1.5;
+    overflow: hidden;
+  }  .foot::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+    width: 30px; background: #d42a1e;
   }
 </style>
 </head>
 <body>
   <div class="head">
-    <div class="q">搜索 <span>{{ query | e }}</span></div>
-    <div class="meta">{{ meta | e }}</div>
+    <div class="kicker">Z-LIBRARY · 搜索</div>
+    <div class="q">{{ query | e }}</div>
   </div>
+  <div class="meta">{{ meta | e }}</div>
+  <div class="list">
   {% for b in books %}
   <div class="item">
+    <div class="no">{{ b.no | e }}</div>
     <div class="cover">
-      <div class="ph">书</div>
+      <div class="ph"><span>书</span></div>
       {% if b.cover %}<img src="{{ b.cover | e }}" onerror="this.style.display='none'">{% endif %}
-      <div class="no">{{ b.no | e }}</div>
     </div>
     <div class="info">
       <div class="title">{{ b.title | e }}</div>
+      <div class="rule"></div>
       <div class="author">{{ b.author | e }}</div>
       {% if b.publisher %}<div class="pub">{{ b.publisher | e }}</div>{% endif %}
       <div class="tags">
@@ -142,6 +184,7 @@ SEARCH_CARD_TMPL = """<!DOCTYPE html>
     </div>
   </div>
   {% endfor %}
+  </div>
   <div class="foot">{{ footer | e }}</div>
 </body>
 </html>
